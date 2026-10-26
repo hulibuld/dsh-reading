@@ -1,0 +1,14 @@
+# dsh-reading 的 profile 补丁。
+#
+# 用 `dsh plugin add <本目录>` 安装后，dsh.bundle 会自动把这一行插进 profile：
+#   - id: reading
+#     name: 'dsh-reading'
+#
+# 这里不写 config：所有可配置项（书库目录、导入上限）都有默认值，
+# 用户想改时在 profile 的 cordis.patch.yml 里按 id 覆盖即可，不要在这里固定。
+#
+# 为什么 id 用 `reading` 而不是 `dsh-reading`：Loader 的 id 是行标识，包名另写；
+# 短 id 便于用户在 patch 里按 `- id: reading` 覆盖，也避免与包名重复。
+- insert:
+    - id: reading
+      name: 'dsh-reading'

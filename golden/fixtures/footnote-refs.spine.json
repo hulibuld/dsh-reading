@@ -1,0 +1,17 @@
+{
+  "fixture": "footnote-refs",
+  "spine": [
+    {
+      "index": 0,
+      "idref": "ch1",
+      "href": "text/ch1.xhtml",
+      "title": "正文角标 + 尾注"
+    },
+    {
+      "index": 1,
+      "idref": "ch2",
+      "href": "text/ch2.xhtml",
+      "title": "角标在段尾"
+    }
+  ]
+}

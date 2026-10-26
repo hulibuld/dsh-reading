@@ -1,0 +1,1326 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<title>书架封面几何验证</title>
+<style>
+:root{--dsw-radius-xl:20px;--dsw-radius-md:12px;--dsw-alias-settings-card-stroke:#e6e6ea;
+--dsw-alias-settings-card-fill:#fff;--dsw-alias-brand-primary:#4a7dff;--dsw-alias-bg-layer-3:#eceef2;}
+html,body{margin:0;background:#f7f7f9;font-family:-apple-system,"PingFang SC",sans-serif;color:#1c1c1e}
+#report{position:sticky;top:0;z-index:9;margin:0;padding:10px 14px;background:#101014;color:#eee;
+font:11.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;max-height:44vh;overflow:auto}
+#shelf{padding:16px}
+
+/* ─────────────────────────────────────────────────────────────
+   根容器：插件在 slot 里拿不到确定高度，所以自己撑满并允许收缩。
+   --dsh-reading-* 是本组件自己的布局变量（不是主题色），
+   色值一律来自 --dsw-alias-*。
+   ───────────────────────────────────────────────────────────── */
+.dr-root {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-base, #ffffff);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  font-size: 13px;
+  line-height: 1.55;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  overflow: hidden;
+}
+
+.dr-grow { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.dr-row { display: flex; align-items: center; gap: 8px; }
+.dr-col { display: flex; flex-direction: column; gap: 8px; }
+.dr-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dr-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ── 页头 ─────────────────────────────────────────────────────── */
+.dr-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--dsw-alias-bg-layer-1, #fbfbfc);
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+}
+.dr-head-title {
+  font-size: 13.5px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-head-sub {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+
+/* ── 按钮 / 控件：统一 R12，H28–36 ─────────────────────────────── */
+.dr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--dsw-radius-md, 12px);
+  border: 0.5px solid var(--dsw-alias-border-l3, #d9d9e0);
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.dr-btn:hover { background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
+.dr-btn:active { transform: translateY(0.5px); }
+.dr-btn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: 1px;
+}
+.dr-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+}
+.dr-btn-primary {
+  border-color: transparent;
+  background: var(--dsw-alias-button-primary-fill, #4a7dff);
+  color: var(--dsw-alias-label-primary-inverted, #ffffff);
+}
+.dr-btn-primary:hover { background: var(--dsw-alias-button-primary-hover, #3d6ded); }
+.dr-btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+}
+.dr-btn-ghost:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #f2f3f5);
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-btn-sm { height: 24px; padding: 0 8px; font-size: 12px; }
+.dr-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: var(--dsw-radius-md, 12px);
+  border: 0.5px solid transparent;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  cursor: pointer;
+  font-family: inherit;
+}
+.dr-iconbtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #f2f3f5);
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-iconbtn:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: 1px;
+}
+.dr-iconbtn[aria-pressed="true"] {
+  background: var(--dsw-alias-interactive-bg-active, #e8ebf2);
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+
+.dr-input, .dr-select, .dr-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  font-family: inherit;
+  font-size: 12.5px;
+  color: var(--dsw-alias-label-primary, #1f2328);
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  border: 0.5px solid var(--dsw-alias-border-l3, #d9d9e0);
+  border-radius: var(--dsw-radius-md, 12px);
+  padding: 7px 9px;
+}
+.dr-textarea { resize: vertical; min-height: 76px; line-height: 1.6; }
+.dr-input:focus, .dr-select:focus, .dr-textarea:focus {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary, #4a7dff);
+}
+
+/* ── 书架 ─────────────────────────────────────────────────────── */
+.dr-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 16px;
+}
+.dr-grid {
+  display: grid;
+  /* auto-fill 不能换成 auto-fit：auto-fit 会把空列折叠掉，书架只有两三本书时
+     剩下的卡片会被拉成「一本占半屏」的超大封面。 */
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  /* 拉伸对齐：同一行的格子统一高度。封面高度由 aspect-ratio 决定（同一行格子
+     等宽 → 封面等高），卡片再吸收多余高度、把进度条压到底部
+     （.dr-progress 的 margin-top:auto），一行里的卡就一样高。 */
+  align-items: stretch;
+  gap: 14px;
+}
+
+/* 格子：grid item 的 min-width 默认是 auto，而卡片里有 nowrap 的作者名，
+   于是长作者会把格子撑到比列宽还宽，卡片溢出去盖住邻卡 —— 这就是
+   「封面大小错乱 / 堆叠」的根因。min-width:0 把最小内容宽度这个闸门关掉。 */
+.dr-book-cell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+  max-width: 200px;
+  margin: 0 auto;
+}
+
+/* 书卡：独立内容卡 → R20 (--dsw-radius-xl) */
+.dr-book {
+  display: flex;
+  flex-direction: column;
+  /* 卡片宽度只听格子的（width:100%），自己不参与最小内容宽度的计算 */
+  min-width: 0;
+  width: 100%;
+  gap: 8px;
+  padding: 10px;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--dsw-radius-xl, 20px);
+  border: 0.5px solid var(--dsw-alias-settings-card-stroke, #e6e6ea);
+  background: var(--dsw-alias-settings-card-fill, #ffffff);
+  transition: border-color 0.12s, transform 0.08s;
+}
+.dr-book:hover {
+  border-color: var(--dsw-alias-brand-primary, #4a7dff);
+  transform: translateY(-1px);
+}
+.dr-book:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: 2px;
+}
+.dr-book:active { transform: none; }
+
+/* 封面：一本书一格，比例恒定 2:3。用 aspect-ratio 而不是固定高度，窄栏也不变形。
+   尺寸只由卡片宽度决定（aspect-ratio），真实封面与米色纸封面共用同一套
+   几何 —— 之前真封面走 img 的 intrinsic 尺寸、纸封面走 flex 居中，
+   两者在窄栏里会不一样大，看起来就是「封面大小错乱」。 */
+.dr-cover {
+  position: relative;
+  width: 100%;
+  /* 盒子自己撑起 2:3，绝不让 flex 压缩它：卡片被拉高时矮封面会变形 */
+  flex: 0 0 auto;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--dsw-radius-md, 12px);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--dsw-alias-bg-layer-3, #eceef2);
+}
+.dr-cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+}
+/* 比例极端的封面（比 1:2 还细、接近方形或横版）：铺满会把主体裁掉大半，
+   改成「模糊铺底 + 完整图居中」。盒子仍是 2:3，所以同行卡片高度不受影响，
+   也不会出现「一张封面被裁成一条」。 */
+.dr-cover.is-extreme {
+  background: #2b2e34;
+}
+.dr-cover.is-extreme > img {
+  object-fit: contain;
+}
+.dr-cover-blur {
+  position: absolute;
+  /* 往外多铺 8px：模糊会把边缘吸透明，不多铺就露出一圈底色 */
+  inset: -8px;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+  filter: blur(14px) saturate(1.05);
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* 没有封面的书：排成一本米色纸书的封面，而不是一行灰色小字。
+   颜色刻意写死而不走主题 token —— 纸封面就是纸，深色主题下也该是米色。 */
+.dr-cover-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  /* 第一行吃满剩余高度放书名，第二行给作者留固定一条 —— 不用绝对定位，
+     长书名再长也压不到作者名字上去。 */
+  grid-template-rows: 1fr auto;
+  align-items: center;
+  justify-items: center;
+  row-gap: 8px;
+  padding: 14px 12px 10px;
+  background: linear-gradient(160deg, #f6eedb 0%, #efe3c8 60%, #e9dcbe 100%);
+  color: #4a3f35;
+  text-align: center;
+  overflow: hidden;
+}
+.dr-cover-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+.dr-cover-rule {
+  width: 26px;
+  height: 0;
+  border-top: 1px solid rgba(74, 63, 53, 0.42);
+}
+.dr-cover-text {
+  max-width: 100%;
+  font-family: "Songti SC", "SimSun", "Source Han Serif SC", serif;
+  font-weight: 600;
+  line-height: 1.32;
+  letter-spacing: 0.04em;
+  text-wrap: balance;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+.dr-cover-author {
+  /* nowrap 让内容不肯收缩，overflow 只裁「看得见的」、不减小最小内容宽度，
+     所以必须显式把宽度钉在盒子里，否则长作者名会把整个格子顶宽。 */
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  color: rgba(74, 63, 53, 0.66);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dr-book-title {
+  /* 同一个道理：两行截断的书名也不许参与「最小内容宽度」的计算 */
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #1f2328);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dr-book-meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+/* 重排书标记（MOBI / TXT 转来的）：小、浅、不抢书名。 */
+.dr-book-badge {
+  align-self: center;
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-bg-layer-3, #eceef2);
+  color: var(--dsw-alias-label-secondary, #5c6270);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.dr-progress {
+  height: 3px;
+  /* 贴底：同一行里有的卡多了「TXT · 重排」标记，卡片被拉成等高之后，
+     进度条和「读了 30%」一起压在底部，一行看过去才是齐的 */
+  margin-top: auto;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-bg-layer-3, #eceef2);
+  overflow: hidden;
+}
+.dr-progress-fill {
+  height: 100%;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-brand-primary, #4a7dff);
+}
+
+/* ── 编辑书名 / 封面的弹窗 ───────────────────────────────────── */
+/* 封面预览沿用书卡的 2:3 盒子，只是窄一些：用户在弹窗里看到的就是书架上
+   会变成的样子，比例不一致会让他以为「保存后封面会变形」。 */
+.dr-edit-cover {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.dr-edit-cover-preview {
+  flex: 0 0 auto;
+  width: 84px;
+}
+.dr-edit-cover-actions {
+  flex: 1 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+.dr-field-hint {
+  width: 100%;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+/* 表单里的错误提示：不走错误框，弹窗里空间小，一行红字更省地方 */
+.dr-form-error {
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--dsw-alias-state-error-primary, #d93025);
+}
+
+/* 轻提示（保存成功之类）：飘在底部中间，两秒自己走，不挡点击 */
+.dr-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 8px 14px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: rgba(20, 22, 26, 0.86);
+  color: #ffffff;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+/* ── 空态 / 加载态 / 错误态 ───────────────────────────────────── */
+.dr-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 40px 24px;
+  text-align: center;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+.dr-state-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+}
+.dr-state-text {
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-width: 34em;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+  white-space: pre-wrap;
+}
+.dr-state-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.dr-error { color: var(--dsw-alias-state-error-primary, #d93025); }
+.dr-error-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 0 0 12px;
+  border-radius: var(--dsw-radius-md, 12px);
+  border: 1px solid var(--dsw-alias-state-error-secondary, #f0c0bd);
+  background: var(--dsw-alias-bg-layer-2, #fdf3f2);
+  color: var(--dsw-alias-state-error-primary, #d93025);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.dr-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  corner-shape: round;
+  border: 2px solid var(--dsw-alias-border-l3, #d9d9e0);
+  border-top-color: var(--dsw-alias-brand-primary, #4a7dff);
+  animation: dr-spin 0.8s linear infinite;
+}
+@keyframes dr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .dr-spinner { animation-duration: 2.4s; }
+  .dr-book, .dr-btn { transition: none; }
+}
+
+/* ── 阅读器 ───────────────────────────────────────────────────── */
+.dr-reader {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-layer-1, #f7f7f9);
+}
+.dr-reader-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  background: var(--dsw-alias-bg-base, #ffffff);
+}
+.dr-reader-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-reader-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+/* 书籍视口：这里是唯一一个 iframe，装的是 EPUB 章节本身，不是插件页面。
+   它必须看得见纸面质感，所以背景给一个偏暖的白，字色由章节 CSS 决定。 */
+.dr-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: var(--dsw-alias-bg-base, #ffffff);
+}
+.dr-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+}
+/* 覆盖层：绝对定位于视口之上，pointer-events:none 保证正文选择不被挡住；
+   需要点击的条目自己打开 pointer-events。 */
+.dr-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.dr-hl {
+  position: absolute;
+  border-radius: var(--dsw-radius-xs, 4px);
+  pointer-events: auto;
+  cursor: pointer;
+}
+.dr-hl-note::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--dsw-alias-label-secondary, #5b6069);
+}
+
+/* 翻页窄边：正文留白里的一条 26px 竖条，看得见、点得到。
+   不用「盖在正文上的大块透明热区」——那会抢鼠标，划过字就误翻页。
+   也不占正文宽度：它是 flex 里的独立一格，正文容器自己按剩余宽度重新分栏。 */
+.dr-rail {
+  flex: 0 0 auto;
+  width: 26px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--dsh-reading-ink, #22262b);
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.dr-rail-chevron {
+  font-size: 18px;
+  line-height: 1;
+  opacity: 0.22;
+  transition: opacity 0.12s, transform 0.12s;
+}
+.dr-rail:hover .dr-rail-chevron { opacity: 0.7; transform: scale(1.18); }
+.dr-rail:active .dr-rail-chevron { transform: scale(1.04); }
+.dr-rail:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: -4px;
+  border-radius: var(--dsw-radius-xs, 4px);
+}
+.dr-rail:disabled { cursor: default; }
+.dr-rail:disabled .dr-rail-chevron { opacity: 0.08; transform: none; }
+
+/* 翻页动效：只做「位置感」，不动 DOM、不碰选区。
+   220ms 与 reader.js 里 flashTurn 的定时器对齐。 */
+@keyframes dr-turn-next {
+  from { opacity: 0.55; transform: translateX(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes dr-turn-prev {
+  from { opacity: 0.55; transform: translateX(-14px); }
+  to { opacity: 1; transform: none; }
+}
+.dr-viewport.dr-turn-next .dr-frame { animation: dr-turn-next 0.22s ease-out both; }
+.dr-viewport.dr-turn-prev .dr-frame { animation: dr-turn-prev 0.22s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .dr-viewport.dr-turn-next .dr-frame,
+  .dr-viewport.dr-turn-prev .dr-frame { animation: none; }
+}
+
+.dr-pageinfo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+  border-top: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  background: var(--dsw-alias-bg-base, #ffffff);
+}
+
+/* ── 目录 / 标注侧栏（面板 R28 只给真正的外壳用） ──────────────── */
+.dr-side {
+  flex: 0 0 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  background: var(--dsw-alias-bg-base, #ffffff);
+  overflow: hidden;
+}
+.dr-side-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+}
+.dr-side-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+}
+
+/* 目录行：控件级 R12；缩进按 depth 给，不用嵌套列表（深度只有几级，够了） */
+.dr-toc-row {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: var(--dsw-radius-md, 12px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dr-toc-row:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #f2f3f5);
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-toc-row[aria-current="true"] {
+  background: var(--dsw-alias-interactive-bg-active, #e8ebf2);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  font-weight: 600;
+}
+.dr-toc-row:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: -2px;
+}
+
+/* 「自动识别」的说明条：目录是猜出来的时候，先自报家门。
+   用户看到这一句，才知道「章节名有点怪」不是我们弄坏了书。 */
+.dr-toc-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px 8px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.dr-toc-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+.dr-toc-note-text {
+  min-width: 0;
+}
+
+/* 标注条目 */
+.dr-ann {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 0.5px solid transparent;
+  border-radius: var(--dsw-radius-md, 12px);
+  background: transparent;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.dr-ann:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #f2f3f5);
+  border-color: var(--dsw-alias-border-l2, #e6e6ea);
+}
+.dr-ann:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: -2px;
+}
+.dr-ann-dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 50%;
+  corner-shape: round;
+}
+.dr-ann-main { flex: 1 1 auto; min-width: 0; }
+.dr-ann-text {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-primary, #1f2328);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.dr-ann-note {
+  margin-top: 3px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.dr-ann-meta {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--dsw-alias-label-quaternary, #a8adb5);
+}
+
+/* ── 选区菜单（挂父窗口，避免被 iframe 裁切） ──────────────────── */
+.dr-menu {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: var(--dsw-radius-lg, 16px);
+  background: var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.97));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 8px 22px rgba(0, 0, 0, 0.12);
+}
+.dr-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l3, #d9d9e0);
+  border-radius: 50%;
+  corner-shape: round;
+  cursor: pointer;
+}
+.dr-swatch:hover { transform: scale(1.12); }
+.dr-swatch:focus-visible {
+  outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
+  outline-offset: 1px;
+}
+.dr-menu-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--dsw-alias-border-l2, #e6e6ea);
+}
+
+/* 笔记编辑小卡：对话框级别的浮层，用 panel 圆角 */
+.dr-note-card {
+  position: fixed;
+  z-index: 41;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-panel, 28px);
+  background: var(--dsw-alias-bg-overlay, rgba(255, 255, 255, 0.98));
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+.dr-note-card .dr-textarea {
+  border-radius: var(--dsw-radius-md, 12px);
+  min-height: 64px;
+}
+.dr-note-actions { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* 顶部细进度条：阅读时一直看得见「读到哪了」 */
+.dr-topbar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 2px;
+  background: transparent;
+  z-index: 4;
+  pointer-events: none;
+}
+.dr-topbar-fill {
+  height: 100%;
+  background: var(--dsw-alias-brand-primary, #4a7dff);
+  transition: width 0.2s;
+}
+/* ─────────────────────────────────────────────────────────────
+   阅读器外观：纸面、底栏、设置抽屉、使用说明。
+   纸色/墨色来自 reader.js 的四档配色，经内联 CSS 变量传进来
+   （--dsh-reading-paper / --dsh-reading-ink / --dsh-reading-rule），缺省时回落到白纸。
+   ───────────────────────────────────────────────────────────── */
+.dr-reader {
+  background: var(--dsh-reading-paper, #fcfbf8);
+  color: var(--dsh-reading-ink, #22262b);
+}
+.dr-reader-bar {
+  background: var(--dsh-reading-paper, #fcfbf8);
+  border-bottom: 0.5px solid var(--dsh-reading-rule, #e6e2d8);
+}
+.dr-reader-title { color: var(--dsh-reading-ink, #22262b); }
+.dr-reader-bar .dr-head-sub { color: var(--dsh-reading-ink, #22262b); opacity: 0.55; }
+.dr-reader-bar .dr-btn-ghost { color: var(--dsh-reading-ink, #22262b); }
+.dr-reader-bar .dr-iconbtn { color: var(--dsh-reading-ink, #22262b); }
+.dr-reader-bar .dr-iconbtn:hover { background: rgba(128, 128, 128, 0.14); }
+.dr-reader .dr-iconbtn-q {
+  font-weight: 700;
+  font-family: ui-serif, Georgia, serif;
+}
+.dr-viewport { background: var(--dsh-reading-paper, #fcfbf8); }
+.dr-frame { background: var(--dsh-reading-paper, #fcfbf8); }
+.dr-rail { color: var(--dsh-reading-ink, #22262b); }
+
+/* 底栏：可见的「上一页 / 下一页」+ 页码 + 本章进度。只在鼠标移上来时才显形，
+   读的时候不抢注意力；触屏设备（hover:none）常显。 */
+.dr-pagebar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-top: 0.5px solid var(--dsh-reading-rule, #e6e2d8);
+  background: var(--dsh-reading-paper, #fcfbf8);
+  font-size: 11.5px;
+  color: var(--dsh-reading-ink, #22262b);
+  opacity: 0.72;
+  transition: opacity 160ms ease;
+}
+.dr-reader:hover .dr-pagebar { opacity: 1; }
+.dr-pagebtn {
+  flex: 0 0 auto;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  border: 0.5px solid var(--dsh-reading-rule, #e6e2d8);
+  background: rgba(128, 128, 128, 0.06);
+  color: inherit;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.dr-pagebtn:hover:not(:disabled) { background: rgba(128, 128, 128, 0.16); }
+.dr-pagebtn:disabled { opacity: 0.35; cursor: default; }
+.dr-pagebtn:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff); outline-offset: 1px; }
+.dr-pagebar-mid {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: center;
+}
+.dr-pagebar-num { font-variant-numeric: tabular-nums; opacity: 0.85; }
+.dr-pagebar-pct { font-variant-numeric: tabular-nums; opacity: 0.6; white-space: nowrap; }
+.dr-pagebar-track {
+  flex: 0 1 220px;
+  height: 3px;
+  min-width: 60px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: rgba(128, 128, 128, 0.22);
+  overflow: hidden;
+}
+.dr-pagebar-fill {
+  height: 100%;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsh-reading-ink, #22262b);
+  opacity: 0.42;
+  transition: width 160ms ease;
+}
+@media (hover: none) {
+  .dr-pagebar { opacity: 0.95; }
+}
+
+/* ── 设置抽屉：从右侧滑出，浮在正文之上 ─────────────────────── */
+.dr-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 8;
+  width: 292px;
+  max-width: 88%;
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-base, #ffffff);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  border-left: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.14);
+  border-radius: var(--dsw-radius-xl, 20px) 0 0 var(--dsw-radius-xl, 20px);
+  animation: dr-drawer-in 160ms ease-out;
+}
+@keyframes dr-drawer-in {
+  from { transform: translateX(12px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.dr-drawer-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.dr-drawer-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.dr-field { display: flex; flex-direction: column; gap: 8px; }
+.dr-field-label {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+  letter-spacing: 0.02em;
+}
+.dr-field-value {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  font-variant-numeric: tabular-nums;
+  min-width: 42px;
+  text-align: right;
+}
+.dr-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.dr-chip {
+  height: 28px;
+  padding: 0 11px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  border: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  background: var(--dsw-alias-bg-layer-2, #f2f3f5);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  font-size: 12px;
+  cursor: pointer;
+}
+.dr-chip:hover { background: var(--dsw-alias-interactive-bg-hover, #e9eaee); }
+.dr-chip.is-on {
+  border-color: var(--dsw-alias-brand-primary, #4a7dff);
+  color: var(--dsw-alias-brand-primary, #4a7dff);
+  background: rgba(74, 125, 255, 0.1);
+  font-weight: 600;
+}
+.dr-slider-row { display: flex; align-items: center; gap: 8px; }
+.dr-slider {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 3px;
+  appearance: none;
+  border-radius: var(--dsw-radius-xs, 4px);
+  background: var(--dsw-alias-border-l2, #e6e6ea);
+  outline: none;
+}
+.dr-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--dsw-alias-brand-primary, #4a7dff);
+  border: 2px solid var(--dsw-alias-bg-base, #ffffff);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.24);
+  cursor: pointer;
+}
+.dr-step {
+  flex: 0 0 auto;
+  height: 26px;
+  min-width: 32px;
+  padding: 0 6px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  border: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  background: var(--dsw-alias-bg-layer-2, #f2f3f5);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.dr-step:hover { background: var(--dsw-alias-interactive-bg-hover, #e9eaee); }
+.dr-themes { display: flex; gap: 8px; }
+.dr-theme {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.dr-theme-swatch {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--dsw-radius-sm, 8px);
+  border: 1px solid transparent;
+  font-size: 15px;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.dr-theme.is-on .dr-theme-swatch { border-color: var(--dsw-alias-brand-primary, #4a7dff); }
+.dr-theme-label {
+  font-size: 10.5px;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+}
+.dr-theme.is-on .dr-theme-label { color: var(--dsw-alias-brand-primary, #4a7dff); font-weight: 600; }
+.dr-drawer-error {
+  font-size: 11.5px;
+  color: var(--dsw-alias-state-error-primary, #d93025);
+}
+.dr-drawer-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+}
+
+/* ── 使用说明弹窗 ────────────────────────────────────────────── */
+.dr-modal-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.42);
+}
+.dr-modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--dsw-alias-bg-base, #ffffff);
+  color: var(--dsw-alias-label-primary, #1f2328);
+  border-radius: var(--dsw-radius-xl, 20px);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.dr-modal-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  font-size: 13px;
+  font-weight: 600;
+}
+.dr-modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px;
+  font-size: 12.5px;
+  line-height: 1.72;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+}
+.dr-modal-body p { margin: 0 0 10px; }
+.dr-modal-body h4 {
+  margin: 16px 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-keys { display: flex; flex-direction: column; gap: 5px; }
+.dr-key-row { display: flex; align-items: baseline; gap: 10px; }
+.dr-key-row kbd {
+  flex: 0 0 150px;
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-xs, 4px);
+  border: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+  background: var(--dsw-alias-bg-layer-2, #f2f3f5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+.dr-modal-foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2, #e6e6ea);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dr-topbar-fill { transition: none; }
+}
+
+/* 窄容器：侧栏改为覆盖在正文上，避免正文被挤到 0 宽 */
+@media (max-width: 720px) {
+  .dr-side {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 5;
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.16);
+  }
+  .dr-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+  /* 窄栏里列宽本身就可能小于 200px，别再给上限，否则卡片两侧留空太宽 */
+  .dr-book-cell { max-width: none; }
+  .dr-body { padding: 12px; }
+}
+
+/* 宽栏：列再宽也把卡片钳住（else 一本占四分之一屏，封面大得离谱），
+   格子居中留白，比让封面无限变大好看 */
+@media (min-width: 1100px) {
+  .dr-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+  .dr-book-cell { max-width: 184px; }
+}
+
+/* ── 问 AI：划词菜单里那个按钮 + 底部提问面板 ────────────────────── */
+
+.dr-menu-ask {
+  /* 五个色板之后第一个实心按钮，视觉上把「问 AI」和「选颜色」分开 */
+  margin: 0 2px;
+}
+
+.dr-ask-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 40;
+}
+
+.dr-ask {
+  width: 100%;
+  max-height: 72%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  color: var(--dsw-alias-label-primary, #22262b);
+  border-radius: var(--dsw-radius-xl, 20px) var(--dsw-radius-xl, 20px) 0 0;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+}
+
+.dr-ask-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dr-ask-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dr-ask-quote {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, #6b7280);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f4);
+  border-left: 2px solid var(--dsw-alias-accent-primary, #4a7dff);
+  border-radius: var(--dsw-radius-xs, 4px);
+  padding: 8px 10px;
+  max-height: 4.9em;
+  overflow: hidden;
+}
+
+.dr-ask-input {
+  min-height: 56px;
+  resize: vertical;
+}
+
+.dr-ask-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--dsw-radius-sm, 8px);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f4);
+}
+
+.dr-ask-answer-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--dsw-alias-label-secondary, #6b7280);
+}
+
+.dr-ask-answer-text {
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dr-ask-answer-meta {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, var(--dsw-alias-label-secondary));
+}
+
+.dr-ask-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+
+</style></head><body>
+<pre id="report">measuring…</pre>
+<div id="shelf"><div class="dr-grid" id="grid">
+  <div class="dr-book-cell">
+    <button type="button" class="dr-book">
+      <div class="dr-cover"><img src="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22400%22%20height%3D%22600%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%234a7dff%22%2F%3E%3Ctext%20x%3D%2250%25%22%20y%3D%2250%25%22%20fill%3D%22%23fff%22%20font-size%3D%2267%22%20text-anchor%3D%22middle%22%20dominant-baseline%3D%22middle%22%20font-family%3D%22sans-serif%22%3E2%3A3%3C%2Ftext%3E%3C%2Fsvg%3E" alt=""></div>
+      <div class="dr-book-title">TED 胶囊：演讲的力量</div>
+      
+      <div class="dr-book-meta dr-ellipsis">克里斯·安德森</div>
+      <div class="dr-progress" role="progressbar"><div class="dr-progress-fill" style="width:12%"></div></div>
+      <div class="dr-book-meta">已读 12%</div>
+    </button>
+  </div>
+  <div class="dr-book-cell">
+    <button type="button" class="dr-book">
+      <div class="dr-cover"><img src="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22200%22%20height%3D%22800%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%238a5cf6%22%2F%3E%3Ctext%20x%3D%2250%25%22%20y%3D%2250%25%22%20fill%3D%22%23fff%22%20font-size%3D%2233%22%20text-anchor%3D%22middle%22%20dominant-baseline%3D%22middle%22%20font-family%3D%22sans-serif%22%3E1%3A4%3C%2Ftext%3E%3C%2Fsvg%3E" alt=""></div>
+      <div class="dr-book-title">一个非常非常长的书名用来测试换行与裁切是否真的生效</div>
+      <div class="dr-book-badge">AZW3 · 重排</div>
+      <div class="dr-book-meta dr-ellipsis">某位作者</div>
+      <div class="dr-progress" role="progressbar"><div class="dr-progress-fill" style="width:0%"></div></div>
+      <div class="dr-book-meta">还没开始读</div>
+    </button>
+  </div>
+  <div class="dr-book-cell">
+    <button type="button" class="dr-book">
+      
+  <div class="dr-cover"><div class="dr-cover-fallback">
+    <div class="dr-cover-frame">
+      <div class="dr-cover-title" style="font-size:20px">没有封面的书</div>
+      <div class="dr-cover-rule"></div>
+    </div>
+    <div class="dr-cover-author">艾伦·莱特曼、布莱恩·R·利特尔、以及另外三位名字特别长的合著者</div>
+  </div></div>
+      <div class="dr-book-title">没有封面的书</div>
+      <div class="dr-book-badge">TXT · 重排</div>
+      <div class="dr-book-meta dr-ellipsis">艾伦·莱特曼、布莱恩·R·利特尔、以及另外三位名字特别长的合著者</div>
+      <div class="dr-progress" role="progressbar"><div class="dr-progress-fill" style="width:47%"></div></div>
+      <div class="dr-book-meta">已读 47%</div>
+    </button>
+  </div>
+  <div class="dr-book-cell">
+    <button type="button" class="dr-book">
+      <div class="dr-cover"><img src="data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22600%22%20height%3D%22600%22%3E%3Crect%20width%3D%22100%25%22%20height%3D%22100%25%22%20fill%3D%22%230f9d58%22%2F%3E%3Ctext%20x%3D%2250%25%22%20y%3D%2250%25%22%20fill%3D%22%23fff%22%20font-size%3D%22100%22%20text-anchor%3D%22middle%22%20dominant-baseline%3D%22middle%22%20font-family%3D%22sans-serif%22%3E1%3A1%3C%2Ftext%3E%3C%2Fsvg%3E" alt=""></div>
+      <div class="dr-book-title">Francesco Petrarca</div>
+      
+      <div class="dr-book-meta dr-ellipsis">Francesco Petrarca</div>
+      <div class="dr-progress" role="progressbar"><div class="dr-progress-fill" style="width:93%"></div></div>
+      <div class="dr-book-meta">已读 93%</div>
+    </button>
+  </div></div></div>
+<script>
+const r = (n) => Math.round(n * 10) / 10
+const grid = document.getElementById('grid')
+const gridBox = grid.getBoundingClientRect()
+const cells = [...grid.querySelectorAll('.dr-book-cell')]
+const books = [...grid.querySelectorAll('.dr-book')]
+const covers = [...grid.querySelectorAll('.dr-cover')]
+const out = []
+out.push('viewport ' + innerWidth + 'x' + innerHeight + ' · grid ' + r(gridBox.width) + 'px · cols=' + getComputedStyle(grid).gridTemplateColumns)
+out.push('─'.repeat(72))
+const cw = cells.map((c) => r(c.getBoundingClientRect().width))
+const ch = cells.map((c) => r(c.getBoundingClientRect().height))
+const covH = covers.map((c) => r(c.getBoundingClientRect().height))
+out.push('card widths  : ' + cw.join(' | '))
+out.push('card heights : ' + ch.join(' | '))
+out.push('cover heights: ' + covH.join(' | '))
+out.push('width spread : ' + r(Math.max(...cw) - Math.min(...cw)) + 'px   height spread: ' + r(Math.max(...ch) - Math.min(...ch)) + 'px')
+out.push('cover ratio  : ' + covers.map((c) => { const b = c.getBoundingClientRect(); return r(b.width / b.height) }).join(' | '))
+let overlap = 0
+for (let i = 0; i < cells.length; i++) for (let j = i + 1; j < cells.length; j++) {
+  const a = cells[i].getBoundingClientRect(), b = cells[j].getBoundingClientRect()
+  if (a.left < b.right - 0.5 && b.left < a.right - 0.5 && a.top < b.bottom - 0.5 && b.top < a.bottom - 0.5) { overlap++; out.push('OVERLAP cell#' + i + ' ↔ #' + j) }
+}
+const rightMost = Math.max(...cells.map((c) => c.getBoundingClientRect().right))
+out.push('overlaps     : ' + overlap)
+out.push('overflow     : ' + (rightMost > gridBox.right + 0.5 ? 'YES +' + r(rightMost - gridBox.right) + 'px' : 'none'))
+const scrolled = document.documentElement.scrollWidth - document.documentElement.clientWidth
+out.push('h-scroll     : ' + (scrolled > 0 ? scrolled + 'px 横向溢出' : 'none'))
+const clipped = [...document.querySelectorAll('.dr-book-title,.dr-cover-author')].filter((el) => el.scrollHeight > el.clientHeight + 1)
+out.push('clipped text : ' + (clipped.length ? clipped.length + ' 处被裁' : 'none'))
+out.push('─'.repeat(72))
+const hSpread = Math.max(...ch) - Math.min(...ch)
+const wSpread = Math.max(...cw) - Math.min(...cw)
+out.push(overlap === 0 && rightMost <= gridBox.right + 0.5 && scrolled <= 0 && wSpread <= 0.5 && hSpread <= 0.5
+  ? 'PASS ✔ 同排等宽等高、封面同一比例、无重叠、无横向溢出'
+  : 'FAIL ✘ 宽差 ' + r(wSpread) + 'px / 高差 ' + r(hSpread) + 'px')
+document.getElementById('report').textContent = out.join('\n')
+</script></body></html>

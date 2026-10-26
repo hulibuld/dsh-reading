@@ -1,0 +1,43 @@
+# 依赖与产物
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# 生成物（可重建，不入库）
+golden/fixtures/
+test/tmp/
+*.log
+
+# 编辑器 / 系统
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# 临时探查脚本（不入库）
+.scratch/
+.scratch*
+# 构建时的原子落盘中间文件（build.mjs 写完立刻 rename）
+.tmp-client.js
+
+# 回滚包只放本机，不进仓库
+backups/
+
+# 由 DSH 上传流程补充
+Thumbs.db
+desktop.ini
+__pycache__/
+*.pyc
+.venv/
+.env
+.env.local
+.env.*.local
+# 交接文档：只留本地，不上传
+交接文档.md
+交接文档.txt
+交接文档-*.md
+交接文档_*.md
+交接文档 *.md
+交接文档*.bak
+HANDOFF.local.md

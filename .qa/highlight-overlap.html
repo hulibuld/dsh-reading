@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>高亮重叠：同一像素 RGB 对照</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #ffffff; }
+  .col { position: absolute; top: 40px; width: 200px; height: 40px; }
+  .box { position: absolute; height: 40px; }
+  .label { position: absolute; top: 12px; font: 12px/1.4 system-ui, sans-serif; color: #333; white-space: nowrap; }
+</style>
+</head>
+<body>
+<!--
+  用途：真浏览器里跑 client/src/annotate.js 的 flattenBoxes，再看重叠像素的 RGB。
+
+  为什么必须用真浏览器截图像素、而不是在 Node 里算 rgba 叠加：这个 bug 的形状是
+  「同一处被画了两三层，alpha 各叠各的，越叠越深」。DOM 合成、背景色、颜色空间
+  任何一处都能让纯计算与真实渲染对不上，所以最后一步一定要拿真实像素说话。
+
+  四列（top 40、高 40、每条宽 120）：
+    A 1 条、B 2 条、C 3 条 —— 都走 flattenBoxes（应完全一致）
+    D 3 条但不裁剪 —— 对照组：叠色确实会变深，证明这页能测出回归
+  采样点选「最深重叠处」：A 第 0 条内部；B 第 0/1 条交集；C 第 0/1/2 条交集。
+-->
+<div id="root"></div>
+<script type="module">
+import { flattenBoxes } from '../client/src/annotate.js'
+
+const FILL = 'rgba(255, 214, 10, 0.38)' // 与 style.js 的黄色划线一致
+const COL_X = [40, 260, 480, 700]
+const TOP = 40
+const BOX_W = 120
+const BOX_H = 40
+const OFFSETS = [0, 40, 80]
+
+const root = document.getElementById('root')
+
+function makeBox(recordId, x) {
+  return {
+    record: { id: recordId },
+    key: recordId + '#0',
+    left: x,
+    top: TOP,
+    width: BOX_W,
+    height: BOX_H,
+    fill: FILL,
+  }
+}
+
+function renderColumn(index, count, flatten) {
+  const x = COL_X[index]
+  const raw = []
+  for (let i = 0; i < count; i += 1) raw.push(makeBox('r' + i, x + OFFSETS[i]))
+  const boxes = flatten ? flattenBoxes(raw) : raw
+
+  const label = document.createElement('div')
+  label.className = 'label'
+  label.style.left = x + 'px'
+  label.textContent = flatten ? `${count} 条（裁剪）` : `${count} 条（未裁剪·对照）`
+  root.appendChild(label)
+
+  const col = document.createElement('div')
+  col.className = 'col'
+  col.style.left = x + 'px'
+  for (const box of boxes) {
+    const el = document.createElement('div')
+    el.className = 'box'
+    el.style.left = (box.left - x) + 'px'
+    el.style.top = '0px'
+    el.style.width = box.width + 'px'
+    el.style.background = box.fill
+    col.appendChild(el)
+  }
+  root.appendChild(col)
+
+  // 采样点：该列「最深的交集」正中（A 第 1 条中部；B 0/1 交集；C 0/1/2 交集）。
+  // 不画标记点：3px 的圆点正好盖住采样像素，量出来的是点的颜色而不是高亮。
+  const sampleX = count === 1 ? x + 20 : x + OFFSETS[count - 1] + 10
+  return { x: sampleX, y: TOP + 20 }
+}
+
+const samples = {
+  one: renderColumn(0, 1, true),
+  two: renderColumn(1, 2, true),
+  three: renderColumn(2, 3, true),
+  naive: renderColumn(3, 3, false),
+  fill: FILL,
+}
+window.__SAMPLES__ = samples
+
+// 把采样点与第一个盒子的实际位置写进 DOM：截图脚本先用 --dump-dom 读它，
+// 再按这些坐标取像素。写死坐标在缩放/字体差异下会悄悄取错地方（本页第一版就踩了）。
+const firstCol = document.querySelector('.col')
+const firstBox = firstCol ? firstCol.querySelector('.box') : null
+const rectOf = (el) => {
+  const r = el.getBoundingClientRect()
+  return { left: r.left, top: r.top, width: r.width, height: r.height }
+}
+const probe = document.createElement('div')
+probe.id = 'probe'
+probe.hidden = true
+probe.setAttribute('data-json', JSON.stringify({
+  samples,
+  col: firstCol ? rectOf(firstCol) : null,
+  box: firstBox ? rectOf(firstBox) : null,
+  dpr: window.devicePixelRatio,
+}))
+document.body.appendChild(probe)
+</script>
+</body>
+</html>

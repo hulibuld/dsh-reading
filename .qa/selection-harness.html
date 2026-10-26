@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>选区菜单几何实测</title>
+<!--
+  为什么要有这个文件：菜单「越翻越偏」是翻页后才显形的 bug，第 1 页怎么测都是对的。
+  单测只能证明公式自洽，证明不了「rect 里真的已经含了 transform」。所以这里用真浏览器
+  摆一本 12 跨页的假书（每跨页两栏，各 300px）+ 一个真 iframe，分别翻到第 1 页与第 10 页，
+  在可见跨页的右栏拖一段真实选区，把真实 rect 喂给 client/src/annotate.js 里的真函数
+  （import 进来，不是复制一份公式），再把「减 pageOffset（旧写法）」与「不减（现写法）」
+  两列偏差并排打出来。
+
+  跑法（headless，输出即证据）：
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+      --headless=new --disable-gpu --allow-file-access-from-files \
+      --window-size=1280,900 --virtual-time-budget=4000 --dump-dom \
+      "file:///<repo>/.qa/selection-harness.html"
+
+  断言口径（与 docs/10 §3.4 一致）：
+    · 菜单中心 x 与选区中心 x 差 ≤ 8px（现写法应当 ≤ 1px）；
+    · 菜单与选取竖向间距 0…12px（上方放不下时翻到下方，不盖住刚划的字）；
+    · 旧写法（在 rangeRect 上再减一次 pageOffset）第 10 页偏差 > 1000px、第 1 页 ≤ 100px
+      —— 这正是「第 1 页看着准、越往后翻越偏」的量化证据；
+    · 菜单不出视口。
+-->
+<style>
+  html, body { margin: 0; padding: 0; background: #f6f5f2; font: 14px/1.7 -apple-system, "PingFang SC", sans-serif; }
+  h1 { font-size: 14px; margin: 16px 40px 8px; color: #444; }
+  #pager {
+    position: relative;
+    margin: 0 0 0 40px;
+    width: 600px;
+    height: 480px;
+    overflow: hidden;
+    background: #fff;
+    border: 1px solid #ddd;
+    box-sizing: border-box;
+  }
+  iframe { position: absolute; left: 0; top: 0; width: 600px; height: 480px; border: 0; }
+  #out { margin: 16px 40px 24px; padding: 12px 14px; background: #111; color: #9f9; font: 12px/1.6 ui-monospace, Menlo, monospace; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>选区菜单几何实测（真 transform + 真 iframe + 跨栏拖选）</h1>
+<div id="pager"><iframe id="frame"></iframe></div>
+<pre id="out">running…</pre>
+
+<script type="module">
+import { rangeRectToMenuBase, placeSelectionMenu, SELECTION_MENU_HEIGHT } from '../client/src/annotate.js'
+
+/** 假书：12 跨页，每跨页 600px（左右两栏各 300px）。 */
+const SPREADS = 12
+const PAGES = [1, 10]
+
+const out = document.getElementById('out')
+const frame = document.getElementById('frame')
+const pager = document.getElementById('pager')
+
+const spreadsHtml = Array.from({ length: SPREADS }, (_, i) => `
+  <section class="spread" data-index="${i}">
+    <p>第 ${i + 1} 跨页左栏。这里是占位文字，用来撑出双栏布局。第二行。第三行。第四行。</p>
+    <p>第 ${i + 1} 跨页右栏，拖选从这里开始。第二行文字。第三行文字。第四行文字。</p>
+  </section>`).join('')
+
+const doc = `<!doctype html><meta charset="utf-8">
+<style>
+  html, body { margin: 0; padding: 0; }
+  body { width: 600px; height: 480px; overflow: hidden; }
+  /* 翻页位移不写死：load 之后按真实布局量出这一跨页的 offsetLeft 再设。
+     写死一个数容易和实际布局（padding、字号）对不上，量出来的偏差就说不清是谁的错。 */
+  #sheets { display: flex; flex-wrap: nowrap; height: 480px; }
+  .spread { flex: 0 0 600px; box-sizing: border-box; overflow: hidden; display: flex; height: 480px; }
+  .spread > p { flex: 0 0 300px; box-sizing: border-box; margin: 0; padding: 20px 30px; font: 16px/30px serif; }
+</style>
+<div id="sheets">${spreadsHtml}</div>`
+
+const round = (n) => Math.round(n * 100) / 100
+
+function report(payload) {
+  const lines = payload.lines ?? []
+  out.textContent = `${lines.join('\n')}\n\n原始量：\n${JSON.stringify(payload, null, 2)}`
+  document.title = payload.ok ? 'done-pass' : 'done-fail'
+}
+
+function fail(reason) {
+  report({ ok: false, reason, lines: [`实测失败：${reason}`] })
+}
+
+/** 第 page 页（1-based）的实测：翻过去、在右栏拖一段、量 rect、算菜单。 */
+function measure(inner, innerWin, sheets, page) {
+  const spread = inner.querySelectorAll('.spread')[page - 1]
+  const left = spread && spread.firstElementChild
+  const right = spread && spread.lastElementChild
+  if (!left || !left.firstChild || !right || !right.firstChild) throw new Error(`第 ${page} 页找不到正文段落`)
+
+  const pageOffset = spread.offsetLeft
+  if (!(pageOffset >= 0)) throw new Error(`第 ${page} 页翻页位移量成了 ${pageOffset}`)
+  sheets.style.transform = `translateX(-${pageOffset}px)`
+  void sheets.getBoundingClientRect() // 强制一次布局，后面的 rect 才是翻页后的
+
+  const range = inner.createRange()
+  // 跨栏拖选：左栏第一段开头 → 右栏第一段结尾，range 的矩形横跨两栏。
+  range.setStart(left.firstChild, 0)
+  range.setEnd(right.firstChild, right.firstChild.textContent.length)
+  const rangeRect = range.getBoundingClientRect()
+  if (!(rangeRect.width > 0 && rangeRect.height > 0)) throw new Error(`第 ${page} 页选区没选上`)
+
+  // 翻页后选区必须落在视口内 —— 否则测的是「书翻过头了」，不是菜单公式。
+  if (rangeRect.left < 0 || rangeRect.left + rangeRect.width > innerWin.innerWidth) {
+    throw new Error(`第 ${page} 页翻页后选区不在视口内（left=${round(rangeRect.left)}, width=${round(rangeRect.width)}）`)
+  }
+
+  const frameBox = frame.getBoundingClientRect()
+  const layerBox = pager.getBoundingClientRect()
+  const base = rangeRectToMenuBase({ rangeRect, frameBox, layerBox, pageOffset })
+  const menu = placeSelectionMenu({ ...base }, {
+    menuWidth: 268,
+    menuHeight: SELECTION_MENU_HEIGHT,
+    gap: 8,
+    viewportWidth: innerWin.innerWidth,
+    viewportHeight: innerWin.innerHeight,
+  })
+
+  // 旧写法：在 rangeRect 上再减一次翻页位移（transform 已经在 rect 里了）。
+  const legacyLeft = base.left - pageOffset
+  const selCenterX = base.left + rangeRect.width / 2
+  const menuCenterX = menu.left + menu.width / 2
+  const gapAbove = base.top - (menu.top + menu.height)
+  const gapBelow = menu.top - (base.top + base.height)
+
+  return {
+    page,
+    pageOffset,
+    rangeRect: { left: round(rangeRect.left), top: round(rangeRect.top), width: round(rangeRect.width), height: round(rangeRect.height) },
+    base: { left: round(base.left), top: round(base.top) },
+    menu: { left: round(menu.left), top: round(menu.top), width: menu.width, height: menu.height },
+    selCenterX: round(selCenterX),
+    menuCenterX: round(menuCenterX),
+    currentErrorX: round(Math.abs(menuCenterX - selCenterX)),
+    legacyCenterX: round(legacyLeft + menu.width / 2),
+    legacyErrorX: round(Math.abs(legacyLeft + menu.width / 2 - selCenterX)),
+    aboveSelection: gapAbove >= -1 && gapAbove <= 12,
+    belowSelection: gapBelow >= -1 && gapBelow <= 12,
+    verticalGap: gapAbove >= -1 && gapAbove <= 12 ? gapAbove : gapBelow,
+    insideViewport: menu.left >= 0 && menu.left + menu.width <= innerWin.innerWidth,
+  }
+}
+
+frame.addEventListener('load', () => {
+  try {
+    const inner = frame.contentDocument
+    const innerWin = frame.contentWindow
+    const sheets = inner.getElementById('sheets')
+
+    const rows = PAGES.map((page) => measure(inner, innerWin, sheets, page))
+
+    const lines = []
+    lines.push('选区菜单几何实测（真实 transform + 真 iframe + 跨栏拖选）')
+    lines.push(`视口 ${window.innerWidth}×${window.innerHeight}；iframe 600×480；每跨页两栏各 300px`)
+    lines.push('')
+    lines.push('page  页偏移px   选区中心x   菜单中心x(现写法)  Δx     菜单中心x(再减offset)  Δx(旧写法)  竖向间距')
+    for (const row of rows) {
+      lines.push([
+        String(row.page).padEnd(5),
+        String(row.pageOffset).padEnd(10),
+        String(row.selCenterX).padEnd(11),
+        String(row.menuCenterX).padEnd(17),
+        String(row.currentErrorX).padEnd(6),
+        String(row.legacyCenterX).padEnd(21),
+        String(row.legacyErrorX).padEnd(11),
+        String(row.verticalGap),
+      ].join(' '))
+    }
+    lines.push('')
+
+    const passX = rows.every((r) => r.currentErrorX <= 8)
+    const passCurrent = rows.every((r) => r.currentErrorX <= 1)
+    const passVertical = rows.every((r) => r.aboveSelection || r.belowSelection)
+    const passInside = rows.every((r) => r.insideViewport)
+    const first = rows[0]
+    const last = rows[rows.length - 1]
+    const passLegacyBig = last.legacyErrorX > 1000
+    // 旧写法的偏差应当「随页码线性增长」：第 10 页与第 1 页的差 ≈ 翻页位移。
+    const passLegacyLinear = Math.abs((last.legacyErrorX - first.legacyErrorX) - last.pageOffset) <= 2
+    const passLegacySmall = first.legacyErrorX <= 300
+
+    lines.push(`断言 菜单中心x 与选区中心x 差 ≤8px          → ${passX ? 'PASS' : 'FAIL'}（${rows.map((r) => `${r.page}页 ${r.currentErrorX}px`).join('，')}）`)
+    lines.push(`断言 现写法偏差 ≤1px（rect 已含 transform）  → ${passCurrent ? 'PASS' : 'FAIL'}`)
+    lines.push(`断言 竖向间距 0…12px（不盖住选区）          → ${passVertical ? 'PASS' : 'FAIL'}（${rows.map((r) => `${r.page}页 ${round(r.verticalGap)}px`).join('，')}）`)
+    lines.push(`断言 菜单不出视口                            → ${passInside ? 'PASS' : 'FAIL'}`)
+    lines.push(`对照 旧写法第 10 页偏差 >1000px               → ${passLegacyBig ? 'PASS' : 'FAIL'}（实测 ${last.legacyErrorX}px）`)
+    lines.push(`对照 旧写法偏差随页码线性增长 ≈ 翻页位移      → ${passLegacyLinear ? 'PASS' : 'FAIL'}（${last.legacyErrorX} − ${first.legacyErrorX} = ${round(last.legacyErrorX - first.legacyErrorX)}px，页偏移 ${last.pageOffset}px）`)
+    lines.push(`对照 旧写法第 1 页偏差只是一次居中误差（≤300px）→ ${passLegacySmall ? 'PASS' : 'FAIL'}（实测 ${first.legacyErrorX}px）`)
+    lines.push('')
+
+    const ok = passX && passCurrent && passVertical && passInside && passLegacyBig && passLegacyLinear && passLegacySmall
+    lines.push(`结论：${ok ? 'PASS' : 'FAIL'}`)
+
+    report({ ok, lines, rows })
+  } catch (error) {
+    fail(String(error && error.stack ? error.stack : error))
+  }
+})
+
+frame.srcdoc = doc
+</script>
+</body>
+</html>

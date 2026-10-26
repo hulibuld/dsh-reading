@@ -1,0 +1,17 @@
+{
+  "fixture": "ruby-rt",
+  "spine": [
+    {
+      "index": 0,
+      "idref": "ch1",
+      "href": "text/ch1.xhtml",
+      "title": "ruby / rt / rp"
+    },
+    {
+      "index": 1,
+      "idref": "ch2",
+      "href": "text/ch2.xhtml",
+      "title": "ruby 与普通文本混排"
+    }
+  ]
+}

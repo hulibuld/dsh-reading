@@ -1,0 +1,17 @@
+{
+  "fixture": "adjacent-text",
+  "spine": [
+    {
+      "index": 0,
+      "idref": "ch1",
+      "href": "text/ch1.xhtml",
+      "title": "文本被元素与注释切断"
+    },
+    {
+      "index": 1,
+      "idref": "ch2",
+      "href": "text/ch2.xhtml",
+      "title": "两段之间夹注释"
+    }
+  ]
+}

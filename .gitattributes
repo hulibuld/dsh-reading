@@ -1,2 +1,10 @@
-# default to LF for text, but keep binary as-is
-* text=auto
+# 全部文本按 LF 入库：client.js 是构建产物，`node client/build.mjs --check`
+# 会逐字节比对；Windows 上 core.autocrlf=true 的检出会把 CRLF 带进来，
+# 于是「代码没改，校验却红了」。这条让跨平台检出保持一致。
+* text=auto eol=lf
+
+# 二进制/生成物，别做行尾转换
+*.png binary
+*.jpg binary
+*.epub binary
+*.gz binary

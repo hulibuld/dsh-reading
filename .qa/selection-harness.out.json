@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "measured": {
+    "pageIndex": 9,
+    "pageOffset": 5400,
+    "rangeRect": {
+      "left": 330,
+      "top": 24,
+      "width": 224,
+      "height": 52
+    },
+    "frameBox": {
+      "left": 41,
+      "top": 64.8
+    },
+    "layerBox": {
+      "left": 40,
+      "top": 63.8
+    },
+    "base": {
+      "left": 331,
+      "top": 25
+    },
+    "menu": {
+      "left": 309,
+      "top": 85,
+      "width": 268,
+      "height": 36
+    },
+    "selCenterX": 443,
+    "menuCenterX": 443,
+    "debug": {
+      "innerWidth": 600,
+      "innerHeight": 480,
+      "sheetsRect": {
+        "left": -5400,
+        "top": 0,
+        "width": 600,
+        "height": 480
+      },
+      "spreadRect": {
+        "left": 0,
+        "top": 0,
+        "width": 600,
+        "height": 480
+      },
+      "rightRect": {
+        "left": 300,
+        "top": 0,
+        "width": 300,
+        "height": 480
+      }
+    }
+  },
+  "compare": {
+    "legacy": {
+      "left": -5069,
+      "errorX": 5378,
+      "note": "在 rangeRect 上再减 pageOffset（t5 之前的写法）"
+    },
+    "current": {
+      "left": 309,
+      "errorX": 0,
+      "note": "只加 iframeRect 减覆盖层原点（现在的唯一实现）"
+    }
+  },
+  "pass": {
+    "centerAligned": true,
+    "aboveSelection": false,
+    "belowSelection": true,
+    "currentNoOffset": true,
+    "legacyOffByPage": true,
+    "legacyClearlyWrong": true,
+    "insideViewport": true
+  }
+}

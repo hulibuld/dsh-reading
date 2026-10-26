@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines 声明的是 ^22.19.0 || >=24.0.0：两端都测，避免只保一头。
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # jsdom 与 ajv 只在测试里用，插件运行时零依赖。
+      - run: npm install --no-save --ignore-scripts jsdom@30 ajv@8
+
+      # build --check → golden 向量 → 全部单测（含端到端与 DOM 不变性）
+      - run: npm run verify

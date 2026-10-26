@@ -1,0 +1,17 @@
+{
+  "fixture": "emoji-cjk-b",
+  "spine": [
+    {
+      "index": 0,
+      "idref": "ch1",
+      "href": "text/ch1.xhtml",
+      "title": "ZWJ 家庭 emoji"
+    },
+    {
+      "index": 1,
+      "idref": "ch2",
+      "href": "text/ch2.xhtml",
+      "title": "组合字符与变体选择符"
+    }
+  ]
+}

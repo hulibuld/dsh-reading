@@ -1,0 +1,17 @@
+{
+  "fixture": "cdata",
+  "spine": [
+    {
+      "index": 0,
+      "idref": "ch1",
+      "href": "text/ch1.xhtml",
+      "title": "CDATA 与文本相邻"
+    },
+    {
+      "index": 1,
+      "idref": "ch2",
+      "href": "text/ch2.xhtml",
+      "title": "CDATA 落在元素里"
+    }
+  ]
+}

@@ -1,0 +1,618 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dsh-reading/schema/1/contract.schema.json",
+  "title": "dsh-Reading 数据契约 v1",
+  "description": "WebDAV 上全部文件的权威定义。两端实现必须能通过本 schema 的用例集。",
+  "$defs": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$",
+      "description": "ULID：前 10 位时间戳（Crockford base32），后 16 位随机。跨设备字典序≈时间序。"
+    },
+    "deviceId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]{2,12}-[a-z0-9]{4,12}$",
+      "description": "形如 mac-7f3a91 / android-2b8c04。生成一次存本地，永不改变。"
+    },
+    "iso8601": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$",
+      "description": "强制 UTC、强制毫秒、强制 Z。禁止时区偏移，避免字符串比较出错。"
+    },
+    "bookHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "color": {
+      "type": "string",
+      "enum": [
+        "yellow",
+        "green",
+        "blue",
+        "pink",
+        "purple"
+      ]
+    },
+    "cfiFull": {
+      "type": "string",
+      "pattern": "^epubcfi\\(\\s*/.+!.+\\s*\\)$",
+      "description": "完整 CFI，必须含恰好一个 '!'（spine 间接步）。点锚点为单路径，范围型为 buildRange 双路径。"
+    },
+    "cfiPartial": {
+      "type": "string",
+      "pattern": "^/[0-9]",
+      "description": "右半段，与 Readium partialCfi 同构：以 / 开头，不含 epubcfi() 包裹、不含 '!'。"
+    },
+    "textFingerprint": {
+      "type": "object",
+      "required": [
+        "head",
+        "tail",
+        "len",
+        "hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "head": {
+          "type": "string",
+          "maxLength": 48
+        },
+        "tail": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "len": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": [
+        "schema",
+        "bookHash",
+        "title",
+        "format",
+        "converterVersion",
+        "spine",
+        "createdAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "bookHash": {
+          "$ref": "#/$defs/bookHash"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "author": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "epub",
+            "mobi-converted",
+            "txt-converted",
+            "pdf-converted"
+          ]
+        },
+        "sourceFormat": {
+          "enum": [
+            "epub",
+            "mobi",
+            "azw3",
+            "txt",
+            "pdf"
+          ]
+        },
+        "converterVersion": {
+          "type": "string"
+        },
+        "encoding": {
+          "description": "重排书（TXT）解码时判定出来的字符编码，例如 utf-8 / gb18030 / utf-16le。仅诊断用途。",
+          "type": "string"
+        },
+        "totalChars": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "chapterCount": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "toc": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "label",
+              "href"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "href": {
+                "type": "string"
+              },
+              "depth": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "spine": {
+          "type": "array",
+          "description": "CFI 前缀校验与重建的唯一依据。手机端不解析 OPF 也能工作。",
+          "items": {
+            "type": "object",
+            "required": [
+              "index",
+              "href"
+            ],
+            "properties": {
+              "index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "href": {
+                "type": "string"
+              },
+              "linear": {
+                "type": "boolean"
+              },
+              "idref": {
+                "type": "string"
+              },
+              "mediaType": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "createdAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "createdBy": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "coverHref": {
+          "type": "string"
+        },
+        "fileSize": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "tocSource": {
+          "description": "0.4.0：目录是哪来的。nav/ncx 是书里自带的真目录；headings 是 TXT 里识别到的真标题；auto 是转换格式（MOBI/AZW3）自动识别的章名；spine 是没有真目录、拿 spine 冒充的；split 是 TXT 按字数硬切的（不是目录）；none 是没有目录。老库缺这个字段按 none 处理。",
+          "type": "string",
+          "enum": ["nav", "ncx", "spine", "auto", "headings", "split", "none"]
+        },
+        "coverVersion": {
+          "description": "0.4.0：封面版本号，换/删一次封面 +1。客户端给封面 URL 加 `&v=` 用，避免换完封面最长一小时还看旧图。没有封面时是 0。",
+          "type": "integer",
+          "minimum": 0
+        },
+        "coverMediaType": {
+          "description": "0.4.0：封面图的 media-type（按文件头魔数判定，不信扩展名）。",
+          "type": "string"
+        }
+      }
+    },
+    "progress": {
+      "type": "object",
+      "required": [
+        "schema",
+        "cfi",
+        "updatedAt",
+        "deviceId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "cfi": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "chapterHref": {
+          "type": "string"
+        },
+        "chapterProgression": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "bookProgression": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/deviceId"
+        }
+      }
+    },
+    "highlight": {
+      "type": "object",
+      "required": [
+        "schema",
+        "id",
+        "type",
+        "cfi",
+        "cfiStart",
+        "cfiEnd",
+        "chapterHref",
+        "textExcerpt",
+        "textFingerprint",
+        "color",
+        "createdAt",
+        "updatedAt",
+        "deviceId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "id": {
+          "$ref": "#/$defs/ulid"
+        },
+        "type": {
+          "const": "highlight"
+        },
+        "cfi": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "cfiStart": {
+          "$ref": "#/$defs/cfiPartial"
+        },
+        "cfiEnd": {
+          "$ref": "#/$defs/cfiPartial"
+        },
+        "chapterHref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "textExcerpt": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "textExcerptTruncated": {
+          "type": "boolean"
+        },
+        "textFingerprint": {
+          "$ref": "#/$defs/textFingerprint"
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "createdAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "anchorStatus": {
+          "enum": [
+            "ok",
+            "repaired",
+            "drifted",
+            "quarantined"
+          ]
+        }
+      }
+    },
+    "note": {
+      "type": "object",
+      "required": [
+        "schema",
+        "id",
+        "type",
+        "cfi",
+        "cfiStart",
+        "cfiEnd",
+        "chapterHref",
+        "textExcerpt",
+        "textFingerprint",
+        "createdAt",
+        "updatedAt",
+        "deviceId",
+        "color",
+        "note"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "id": {
+          "$ref": "#/$defs/ulid"
+        },
+        "type": {
+          "const": "note"
+        },
+        "cfi": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "cfiStart": {
+          "$ref": "#/$defs/cfiPartial"
+        },
+        "cfiEnd": {
+          "$ref": "#/$defs/cfiPartial"
+        },
+        "chapterHref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "textExcerpt": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "textFingerprint": {
+          "$ref": "#/$defs/textFingerprint"
+        },
+        "color": {
+          "$ref": "#/$defs/color"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8192
+        },
+        "createdAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "deleted": {
+          "type": "boolean"
+        },
+        "anchorStatus": {
+          "enum": [
+            "ok",
+            "repaired",
+            "drifted",
+            "quarantined"
+          ]
+        }
+      }
+    },
+    "bookmark": {
+      "type": "object",
+      "required": [
+        "schema",
+        "id",
+        "type",
+        "cfi",
+        "cfiStart",
+        "chapterHref",
+        "createdAt",
+        "updatedAt",
+        "deviceId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "id": {
+          "$ref": "#/$defs/ulid"
+        },
+        "type": {
+          "const": "bookmark"
+        },
+        "cfi": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "cfiStart": {
+          "$ref": "#/$defs/cfiPartial"
+        },
+        "chapterHref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "createdAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "qa": {
+      "type": "object",
+      "description": "anchorCfiRange 必填是硬约束：没有位置锚定的回答不许落盘。",
+      "required": [
+        "schema",
+        "id",
+        "anchorCfiRange",
+        "question",
+        "answer",
+        "cutoffCfi",
+        "createdAt",
+        "updatedAt",
+        "deviceId"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "id": {
+          "$ref": "#/$defs/ulid"
+        },
+        "type": {
+          "const": "qa"
+        },
+        "anchorCfiRange": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "anchorAnnotationId": {
+          "$ref": "#/$defs/ulid"
+        },
+        "question": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "contextExcerpt": {
+          "type": "string",
+          "maxLength": 8192
+        },
+        "contextCfiRange": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "cutoffCfi": {
+          "$ref": "#/$defs/cfiFull"
+        },
+        "model": {
+          "type": "string"
+        },
+        "threadId": {
+          "$ref": "#/$defs/ulid"
+        },
+        "parentId": {
+          "$ref": "#/$defs/ulid"
+        },
+        "createdAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "updatedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "deviceId": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "deleted": {
+          "type": "boolean"
+        }
+      }
+    },
+    "quarantine": {
+      "type": "object",
+      "description": "隔离舱：只写不读。存在的意义是数据不丢，等以后能修。",
+      "required": [
+        "schema",
+        "id",
+        "reason",
+        "sourceDeviceId",
+        "ingestedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "const": "dsh-reading/1"
+        },
+        "id": {
+          "$ref": "#/$defs/ulid"
+        },
+        "type": {
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "cfi_parse_failed",
+            "cfi_resolve_failed",
+            "cfi_range_inverted",
+            "cfi_cross_document",
+            "cfi_collapsed_highlight",
+            "cfi_offset_out_of_bounds",
+            "cfi_prefix_mismatch",
+            "fingerprint_drift",
+            "schema_invalid",
+            "orphan_anchor"
+          ]
+        },
+        "rawCfi": {
+          "type": "string"
+        },
+        "rawRecord": {
+          "type": "string"
+        },
+        "sourceDeviceId": {
+          "$ref": "#/$defs/deviceId"
+        },
+        "ingestedAt": {
+          "$ref": "#/$defs/iso8601"
+        },
+        "repairable": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/meta"
+    },
+    {
+      "$ref": "#/$defs/progress"
+    },
+    {
+      "$ref": "#/$defs/highlight"
+    },
+    {
+      "$ref": "#/$defs/note"
+    },
+    {
+      "$ref": "#/$defs/bookmark"
+    },
+    {
+      "$ref": "#/$defs/qa"
+    },
+    {
+      "$ref": "#/$defs/quarantine"
+    }
+  ]
+}

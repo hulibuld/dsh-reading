@@ -1,0 +1,17 @@
+{
+  "fixture": "nested-inline",
+  "spine": [
+    {
+      "index": 0,
+      "idref": "ch1",
+      "href": "text/ch1.xhtml",
+      "title": "三成 div + p + em/strong"
+    },
+    {
+      "index": 1,
+      "idref": "ch2",
+      "href": "text/ch2.xhtml",
+      "title": "兄弟元素与空 div"
+    }
+  ]
+}
