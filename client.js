@@ -4342,6 +4342,10 @@ window.__ModuleLoader__.load({
          「›」正好压住正文最后几个字（用户报的就是这个）。手机上拇指够不着窄边，
          所以 34% 只在触屏（hover:none）保留。 */
       @media (hover: hover) and (pointer: fine) {
+        /* 桌面上干脆不要这两块热区：它们压在正文最后两行上，鼠标滑到页底时会盖住字。
+           桌面翻页本来就有三条路——两侧窄边（.dr-rail）、键盘、滚轮/触控板，不缺这一条。
+           触屏（hover:none）仍然保留 34% 的大热区，那是拇指唯一够得着的地方。 */
+        .dr-turn-zone { display: none; }
         .dr-turn-zone { width: 16%; }
         .dr-turn-zone-next { padding-right: 2px; }
         .dr-turn-zone-prev { padding-left: 2px; }
