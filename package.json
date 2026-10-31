@@ -1,6 +1,6 @@
 {
   "name": "dsh-reading",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": false,
   "description": "在 DeepSeek Harness 里读书：导入 EPUB / MOBI / AZW3 / TXT / PDF，分页阅读、目录、进度、五色划线、笔记与书签。锚点用 EPUB CFI，数据落在你自己的磁盘上，AI 状态诊断与读书蒸馏。0.9.0 加 Legado 书源导入与搜书。",
   "type": "module",

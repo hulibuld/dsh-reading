@@ -1173,6 +1173,7 @@ export function AskPanel(props) {
         'div',
         { className: 'dr-ask-head' },
         h('span', { className: 'dr-ask-title' }, '问 AI'),
+        h(AiModelBar, { compact: true, label: '分析模型' }),
         round >= 2 ? h('span', { className: 'dr-chip dr-ask-round' }, `第 ${round} 轮`) : null,
         // AI 状态点：失败前就能看出「现在根本连不上」，不用先试一次再怀疑
         typeof props.onOpenAi === 'function'

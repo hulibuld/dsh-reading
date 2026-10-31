@@ -20,6 +20,7 @@ import {
   updateBook,
 } from './api.js'
 import { LegadoPanel } from './legado-ui.js'
+import { AiModelBar } from './ai.js'
 
 /** 单次导入的界面提示上限：超过这个大小先提醒一句，但不阻止（宿主说了算）。 */
 const BIG_FILE_BYTES = 120 * 1024 * 1024
@@ -470,6 +471,7 @@ function BookEditDialog(props) {
         { className: 'dr-modal-head' },
         h('span', null, '编辑书名和封面'),
         h('div', { className: 'dr-grow' }),
+    h(AiModelBar, { compact: true, label: '分析模型' }),
         h(
           'button',
           {

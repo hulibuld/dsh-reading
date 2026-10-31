@@ -2679,7 +2679,59 @@ export const CSS_LEGADO = `
  * @returns {string}
  */
 export function cssText() {
-  return CSS + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO
+
+/**
+ * 分析模型选择条（0.9.4）
+ *
+ * 书架上和提问面板里各有一份，所以做成一个能自适应宽度的行：
+ * 窄了就折行，标签不换行。别给它固定宽度——书架头部的右半边是留给按钮的。
+ */
+const CSS_AIMODEL = `
+.dr-aimodel-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.dr-aimodel-label {
+  font-size: 12px;
+  color: var(--dsw-alias-text-secondary, #6b6b6b);
+  white-space: nowrap;
+}
+.dr-aimodel-select {
+  height: 30px;
+  min-width: 150px;
+  max-width: 260px;
+  font-size: 12.5px;
+  padding: 0 8px;
+}
+.dr-aimodel-effort {
+  min-width: 96px;
+  max-width: 130px;
+}
+.dr-aimodel-note {
+  font-size: 11.5px;
+  color: var(--dsw-alias-text-tertiary, #8a8a8a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+.dr-aimodel-bar.is-compact .dr-aimodel-select {
+  height: 26px;
+  min-width: 128px;
+  max-width: 200px;
+  font-size: 11.5px;
+}
+.dr-aimodel-bar.is-compact .dr-aimodel-note { max-width: 200px; }
+@media (max-width: 720px) {
+  .dr-aimodel-bar .dr-aimodel-note { display: none; }
+  .dr-aimodel-bar .dr-aimodel-select { min-width: 120px; flex: 1 1 120px; }
+}
+`
+
+  return CSS + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL
 }
 
 /**

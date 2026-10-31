@@ -1,3 +1,5 @@
+import { call } from './api.js'
+
 /**
  * ai.js —— AI 调用状态与失败账本的界面。
  *
@@ -337,5 +339,138 @@ export function AiModelPicker(props) {
       }, effortOptions)),
     h('div', { className: 'dr-ai-effective' }, `实际使用：${describeEffective(models)}`),
     note,
+  )
+}
+
+/**
+ * 分析模型选择条。
+ *
+ * 三个地方要用它：书架上（拿书之前先看看分析这本书用什么模型）、
+ * 划线菜单/提问面板里（当场换）、AI 状态页。所以它自己负责取数据和保存，
+ * 不依赖外层传 models —— 否则每处都得抄一遍加载逻辑。
+ *
+ * 保存的就是 settings 里那三个键（aiProvider / aiModel / aiEffort），
+ * 和 AI 面板共用同一份设置，换哪都一样。
+ */
+export function AiModelBar(props) {
+  const [models, setModels] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const load = useCallback(async () => {
+    try {
+      const value = await call('ai.models')
+      setModels(value && typeof value === 'object' ? value : null)
+      setError('')
+    } catch (err) {
+      setModels(null)
+      setError(typeof err?.message === 'string' ? err.message : '读不到模型列表')
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const value = await call('ai.models')
+        if (alive) setModels(value && typeof value === 'object' ? value : null)
+      } catch (err) {
+        if (alive) setError(typeof err?.message === 'string' ? err.message : '读不到模型列表')
+      }
+    })()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  if (models === null) {
+    return h(
+      'div',
+      { className: 'dr-aimodel-bar' },
+      h('span', { className: 'dr-aimodel-label' }, props?.label || '分析模型'),
+      h('span', { className: 'dr-aimodel-note' }, error !== '' ? `读不到模型列表：${error}` : '正在读模型列表…'),
+    )
+  }
+
+  const groups = modelGroups(models)
+  const current = models.current ?? {}
+  const provider = typeof current.provider === 'string' ? current.provider : ''
+  const model = typeof current.model === 'string' ? current.model : ''
+  const effort = typeof current.reasoningEffort === 'string' ? current.reasoningEffort : ''
+  const efforts = Array.isArray(models.efforts) ? models.efforts : []
+  const declared = effortsForModel(models, provider, model)
+  const effective = models.effective ?? {}
+
+  const save = async (patch) => {
+    setSaving(true)
+    try {
+      await call('settings.put', patch)
+      await load()
+      if (typeof props?.onChange === 'function') props.onChange(patch)
+    } catch (err) {
+      setError(typeof err?.message === 'string' ? err.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const options = [h('option', { key: '__follow', value: '' }, '跟随当前会话')]
+  groups.forEach((group) => {
+    options.push(h(
+      'optgroup',
+      { key: group.id, label: group.name },
+      group.models.map((entry) => h(
+        'option',
+        { key: `${group.id}/${entry.id}`, value: modelValue(group.id, entry.id) },
+        entry.name,
+      )),
+    ))
+  })
+
+  const effortIds = declared.length > 0 ? declared : ['off', 'low', 'medium', 'high', 'max']
+  const effortOptions = [h('option', { key: '__default', value: '' }, '默认强度')].concat(
+    effortIds.map((id) => h('option', { key: id, value: id }, effortName(efforts, id))),
+  )
+
+  return h(
+    'div',
+    { className: props?.compact === true ? 'dr-aimodel-bar is-compact' : 'dr-aimodel-bar' },
+    h('span', { className: 'dr-aimodel-label' }, props?.label || '分析模型'),
+    h(
+      'select',
+      {
+        className: 'dr-select dr-aimodel-select',
+        value: modelValue(provider, model),
+        disabled: saving,
+        'aria-label': '分析用的模型',
+        onChange: (event) => {
+          const next = parseModelValue(event.target.value)
+          save({ aiProvider: next.provider, aiModel: next.model, aiEffort: effort })
+        },
+      },
+      options,
+    ),
+    h(
+      'select',
+      {
+        className: 'dr-select dr-aimodel-select dr-aimodel-effort',
+        value: effort,
+        disabled: saving,
+        'aria-label': '思考强度',
+        onChange: (event) => save({ aiProvider: provider, aiModel: model, aiEffort: event.target.value }),
+      },
+      effortOptions,
+    ),
+    h(
+      'span',
+      { className: 'dr-aimodel-note' },
+      saving
+        ? '保存中…'
+        : error !== ''
+          ? error
+          : typeof effective.note === 'string' && effective.note !== ''
+            ? effective.note
+            : `实际使用：${describeEffective({ effective })}`,
+    ),
   )
 }
