@@ -101,18 +101,36 @@ const CSS = `
   height: 28px;
   padding: 0 10px;
   border-radius: var(--dsw-radius-md, 12px);
-  border: 0.5px solid var(--dsw-alias-border-l3, #d9d9e0);
+  /* 立体感来自三层：上缘一道浅高光（inset 白）、底缘一道描边暗部、外面一层软阴影。
+     不做浮雕渐变——那在深色主题下会糊成一团。 */
+  border: 1px solid var(--dsw-alias-border-l3, #d9d9e0);
   background: var(--dsw-alias-bg-layer-1, #ffffff);
+  background-image: linear-gradient(
+    var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.9)),
+    var(--dsw-alias-bg-layer-1, #ffffff)
+  );
   color: var(--dsw-alias-label-primary, #1f2328);
   font-family: inherit;
   font-size: 12.5px;
   font-weight: 550;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s;
+  box-shadow:
+    inset 0 1px 0 var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.9)),
+    0 1px 2px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.08));
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.06s;
 }
-.dr-btn:hover { background: var(--dsw-alias-interactive-bg-hover, #f2f3f5); }
-.dr-btn:active { transform: translateY(0.5px); }
+.dr-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, #f2f3f5);
+  border-color: var(--dsw-alias-border-l2, #c9ccd4);
+  box-shadow:
+    inset 0 1px 0 var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.9)),
+    0 2px 6px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.12));
+}
+.dr-btn:active {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 4px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.18));
+}
 .dr-btn:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
   outline-offset: 1px;
@@ -123,11 +141,22 @@ const CSS = `
   transform: none;
 }
 .dr-btn-primary {
-  border-color: transparent;
-  background: var(--dsw-alias-button-primary-fill, #4a7dff);
-  color: var(--dsw-alias-label-primary-inverted, #ffffff);
+  /* 不依赖宿主的 button-primary token：某些主题里它是浅色，白字会看不见。
+     这里固定深蓝 + 纯白，保证任何主题下都读得出来。 */
+  border-color: #2b5fc9;
+  background: #2f6bdd;
+  background-image: linear-gradient(#3d7bee, #2f6bdd);
+  color: #ffffff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.28),
+    0 2px 6px var(--dsw-alias-shadow-brand, rgba(74, 125, 255, 0.32));
 }
-.dr-btn-primary:hover { background: var(--dsw-alias-button-primary-hover, #3d6ded); }
+.dr-btn-primary:hover {
+  background: #2a60cd;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 3px 10px var(--dsw-alias-shadow-brand, rgba(74, 125, 255, 0.4));
+}
 .dr-btn-ghost {
   border-color: transparent;
   background: transparent;
@@ -143,15 +172,22 @@ const CSS = `
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   padding: 0;
-  border-radius: var(--dsw-radius-md, 12px);
-  border: 0.5px solid transparent;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary, #5b6069);
+  border-radius: var(--dsw-radius-md, 10px);
+  border: 1px solid #d5d3cd;
+  background: #f3f2ef;
+  color: #2f333a;
+  font-size: 15px;
+  line-height: 1;
   cursor: pointer;
-  font-family: inherit;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.dr-iconbtn:hover {
+  background: #e7e5e0;
+  color: #14171c;
+  border-color: #b9b6ae;
 }
 .dr-iconbtn:hover {
   background: var(--dsw-alias-interactive-bg-hover, #f2f3f5);
@@ -195,23 +231,70 @@ const CSS = `
   display: grid;
   /* auto-fill 不能换成 auto-fit：auto-fit 会把空列折叠掉，书架只有两三本书时
      剩下的卡片会被拉成「一本占半屏」的超大封面。 */
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  /* 一页最多 6 本：固定列数而不是 auto-fill —— auto-fill 在宽屏会排出 8、9 列，
+     封面被压成邮票大小，用户还得用眼睛找。列数随宽度退档，宽屏封顶 6 列。 */
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   /* 拉伸对齐：同一行的格子统一高度。封面高度由 aspect-ratio 决定（同一行格子
      等宽 → 封面等高），卡片再吸收多余高度、把进度条压到底部
      （.dr-progress 的 margin-top:auto），一行里的卡就一样高。 */
   align-items: stretch;
   gap: 14px;
 }
+/* 列数退档：一页最多 6 本，窄了依次 5/4/3/2，永远不挤成邮票。 */
+@media (max-width: 1180px) { .dr-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (max-width: 980px) { .dr-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 780px) { .dr-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .dr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* 格子：grid item 的 min-width 默认是 auto，而卡片里有 nowrap 的作者名，
    于是长作者会把格子撑到比列宽还宽，卡片溢出去盖住邻卡 —— 这就是
    「封面大小错乱 / 堆叠」的根因。min-width:0 把最小内容宽度这个闸门关掉。 */
 .dr-book-cell {
   position: relative;
+  /* 卡片右上角的「编辑」按钮绝对定位就挂在这里 */
+.dr-book-edit {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--dsw-alias-line-tertiary, #e0ddd6);
+  border-radius: var(--dsw-radius-full, 999px);
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.94));
+  color: #23262d;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(23, 26, 33, 0.22);
+  /* 不再默认藏起来：用户找不到就等于没有。悬停时再加强。 */
+  opacity: 0.92;
+  transition: opacity 0.14s, background 0.14s, color 0.14s;
+}
+.dr-book-cell:hover .dr-book-edit,
+.dr-book-edit:focus-visible {
+  opacity: 1;
+  background: #ffffff;
+  border-color: #2f6bdd;
+  color: #2f6bdd;
+}
+.dr-book-edit:hover {
+  background: #ffffff;
+  color: #2f6bdd;
+  border-color: #2f6bdd;
+}
+/* 触屏没有 hover：编辑按钮常驻，否则永远点不到 */
+@media (hover: none) {
+  .dr-book-edit { opacity: 1; }
+}
   display: flex;
   min-width: 0;
   width: 100%;
-  max-width: 200px;
+  max-width: 240px;
   margin: 0 auto;
 }
 
@@ -1236,17 +1319,17 @@ const CSS = `
     z-index: 5;
     box-shadow: 0 0 24px rgba(0, 0, 0, 0.16);
   }
-  .dr-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-  /* 窄栏里列宽本身就可能小于 200px，别再给上限，否则卡片两侧留空太宽 */
+  .dr-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  /* 窄栏里列宽本身就可能小于 240px，别再给上限，否则卡片两侧留空太宽 */
   .dr-book-cell { max-width: none; }
   .dr-body { padding: 12px; }
 }
 
-/* 宽栏：列再宽也把卡片钳住（else 一本占四分之一屏，封面大得离谱），
-   格子居中留白，比让封面无限变大好看 */
+/* 宽栏：列数封在 6（见 .dr-grid 的 repeat(6)），这里只放开卡片上限，
+   让宽屏下的封面真的变大 —— 0.9.0 之前是 184px 封顶，看着像没改过。 */
 @media (min-width: 1100px) {
-  .dr-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
-  .dr-book-cell { max-width: 184px; }
+  .dr-grid { gap: 16px; }
+  .dr-book-cell { max-width: 240px; }
 }
 
 /* ── 问 AI：划词菜单里那个按钮 + 底部提问面板 ────────────────────── */
@@ -1348,7 +1431,18 @@ const CSS = `
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  padding: 0 0 10px;
+  /* 与页头、与第一行封面之间都要留白：贴着上边栏时两个按钮看着像压在标题上 */
+  padding: 14px 0 14px;
+  margin-bottom: 8px;
+}
+/* 右半边：计数 + 两级筛选，靠右对齐 */
+.dr-filters-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .dr-filter-select {
   width: auto;
@@ -2384,9 +2478,20 @@ export const CSS_SHELF_BUTTONS = `
 }
 .dr-filters-btn {
   height: 34px;
+  order: 0;
   padding: 0 14px;
   font-size: 13.5px;
-  margin-left: auto;
+  /* 不再用 margin-left:auto —— 它现在是这一行的第一个元素，
+     自动外边距会把它推到中间，左边留一大块空白 */
+  /* 书源是这版的主入口，给它一点品牌色，别和「全部书籍」下拉混成一片灰 */
+  border-color: #2b2f38;
+  background: #333842;
+  background-image: linear-gradient(#3d434e, #2e323b);
+  color: #ffffff;
+}
+.dr-filters-btn:hover {
+  background: #23262d;
+  border-color: #1a1d22;
 }
 @media (max-width: 720px) {
   .dr-filter-select,
@@ -2417,36 +2522,56 @@ export const CSS_SETTINGS_GROUPS = `
  * 名字一行、来源与作者一行、最新章节一行，扫视的时候从粗到细。
  */
 export const CSS_LEGADO = `
-.dr-filters-btn { margin-left: auto; }
-.dr-legado-modal { align-items: center; justify-content: center; }
 .dr-legado-card {
-  width: min(760px, calc(100vw - 32px));
-  max-height: calc(100vh - 80px);
+  width: min(760px, 100%);
+  max-width: 760px;
+  max-height: min(760px, 100%);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
+/* 分段式标签：两个胶囊而不是下划线 —— 只有两页的时候，下划线看着像表单步骤条 */
 .dr-tabs {
   display: flex;
-  gap: 4px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+  gap: 2px;
+  margin: 12px 16px 0;
+  padding: 3px;
+  border-radius: var(--dsw-radius-lg, 12px);
+  background: var(--dsw-alias-bg-layer-2, #f2f3f5);
 }
 .dr-tab {
   appearance: none;
   border: 0;
+  flex: 1 1 auto;
+  padding: 7px 12px;
+  border-radius: var(--dsw-radius-md, 10px);
   background: none;
-  padding: 9px 12px;
   font: inherit;
   font-size: 13px;
+  font-weight: 550;
   color: var(--dsw-alias-label-secondary, #5b6069);
   cursor: pointer;
-  border-bottom: 2px solid transparent;
+  transition: background 0.12s, color 0.12s, box-shadow 0.12s;
 }
+.dr-tab:hover { color: var(--dsw-alias-label-primary, #22262b); }
 .dr-tab.is-on {
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
   color: var(--dsw-alias-label-primary, #22262b);
-  border-bottom-color: var(--dsw-alias-brand-primary, #4a7);
+  box-shadow: 0 1px 3px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.12));
   font-weight: 600;
+}
+/* 弹窗标题：h2 原来是浏览器默认字号，显小 */
+.dr-legado-card .dr-modal-head { padding: 14px 18px; }
+.dr-legado-card .dr-modal-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.dr-legado-sub-head {
+  margin-top: 3px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
 }
 .dr-legado-body {
   padding: 14px 16px 18px;
@@ -2457,6 +2582,38 @@ export const CSS_LEGADO = `
 }
 .dr-legado-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .dr-legado-row .dr-input { flex: 1 1 220px; min-width: 0; }
+.dr-legado-body .dr-input {
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--dsw-alias-line-tertiary, #e0ddd6);
+  border-radius: var(--dsw-radius-md, 10px);
+  background: var(--dsw-alias-bg-layer-1, #ffffff);
+  color: var(--dsw-alias-label-primary, #22262b);
+  font: inherit;
+  font-size: 13px;
+}
+.dr-legado-body .dr-input:focus {
+  outline: none;
+  border-color: var(--dsw-alias-brand-primary, #4a7dff);
+  box-shadow: 0 0 0 3px var(--dsw-alias-brand-soft, rgba(74, 125, 255, 0.18));
+}
+.dr-legado-body .dr-input::placeholder { color: var(--dsw-alias-label-tertiary, #a0a4ac); }
+.dr-legado-body .dr-btn { height: 36px; padding: 0 16px; font-size: 13px; }
+.dr-legado-item .dr-btn { height: 32px; padding: 0 12px; font-size: 12.5px; }
+.dr-legado-count { font-size: 11.5px; color: var(--dsw-alias-label-tertiary, #8a8f98); }
+.dr-legado-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 26px 12px;
+  border: 1px dashed var(--dsw-alias-line-tertiary, #e0ddd6);
+  border-radius: var(--dsw-radius-lg, 12px);
+  color: var(--dsw-alias-label-tertiary, #8a8f98);
+  font-size: 12.5px;
+  text-align: center;
+}
+.dr-legado-empty-icon { font-size: 22px; line-height: 1.2; }
 .dr-legado-textarea {
   width: 100%;
   resize: vertical;
@@ -2493,6 +2650,10 @@ export const CSS_LEGADO = `
   white-space: nowrap;
 }
 .dr-legado-item .dr-btn { flex: 0 0 auto; align-self: center; }
+.dr-legado-item:hover {
+  border-color: var(--dsw-alias-line-secondary, #d3cfc6);
+  box-shadow: 0 2px 8px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.08));
+}
 .dr-legado-failures { font-size: 11.5px; color: var(--dsw-alias-label-secondary, #5b6069); }
 .dr-legado-failures ul { margin: 6px 0 0; padding-left: 18px; }
 .dr-note-ok {

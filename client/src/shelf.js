@@ -1248,10 +1248,37 @@ export function ShelfView(props) {
   const visibleBooks = filterBooks(safeBooks, filterKind, filterValue)
   const filterLabel = (FILTER_KINDS.find(([value]) => value === filterKind) ?? ['all', '全部书籍'])[1]
 
-  // 筛选栏固定左上角：先选「按什么筛」，再选「具体值」。
+  // 筛选栏：左边放「书源」（这版的主入口），右边放筛选条件与计数。
+  // 左右分开而不是挨着排，是因为它们属于两种事——一个是「拿书进来」，
+  // 一个是「看哪些书」，挤成一串会让人以为它们有关。
   const filterBar = h(
     'div',
     { className: 'dr-filters' },
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'dr-btn dr-filters-btn',
+        onClick: () => setLegadoOpen(true),
+        title: '导入 Legado 书源、按书源搜书',
+      },
+      '书源',
+    ),
+    filterKind !== 'all'
+      ? h(
+        'button',
+        {
+          type: 'button',
+          className: 'dr-btn',
+          onClick: () => {
+            setFilterKind('all')
+            setFilterValue('')
+          },
+        },
+        '清除筛选',
+      )
+      : null,
+    h('div', { className: 'dr-filters-right' },
     h(
       'select',
       {
@@ -1279,33 +1306,10 @@ export function ShelfView(props) {
         ),
       )
       : null,
-    filterKind !== 'all'
-      ? h(
-        'button',
-        {
-          type: 'button',
-          className: 'dr-btn',
-          onClick: () => {
-            setFilterKind('all')
-            setFilterValue('')
-          },
-        },
-        '清除筛选',
-      )
-      : null,
-    h(
-      'button',
-      {
-        type: 'button',
-        className: 'dr-btn dr-filters-btn',
-        onClick: () => setLegadoOpen(true),
-        title: '导入 Legado 书源、按书源搜书',
-      },
-      '书源',
+      safeBooks.length > 0
+        ? h('span', { className: 'dr-filters-count' }, `${visibleBooks.length} / ${safeBooks.length} 本`)
+        : null,
     ),
-    safeBooks.length > 0
-      ? h('span', { className: 'dr-filters-count' }, `${visibleBooks.length} / ${safeBooks.length} 本`)
-      : null,
   )
 
   const head = h(

@@ -182,10 +182,29 @@ export function LegadoPanel(props) {
     error !== '' ? h('div', { className: 'dr-note dr-note-error', role: 'alert' }, error) : null,
     notice !== '' ? h('div', { className: 'dr-note dr-note-ok', role: 'status' }, notice) : null,
     results === null
-      ? h('p', { className: 'dr-note' }, '在已启用的书源里同时搜索。加进书架的只是目录，正文翻到那一章才会抓。')
+      ? h(
+        'div',
+        { className: 'dr-legado-empty' },
+        h('span', { className: 'dr-legado-empty-icon' }, '🔍'),
+        h('span', null, '在已启用的书源里同时搜索'),
+        h('span', null, '加进书架的只是目录，正文翻到那一章才抓'),
+      )
       : results.length === 0 && !searching
-        ? h('p', { className: 'dr-note' }, '没有搜到。换个关键词，或者先去「书源」页看看源是不是被停用了。')
+        ? h(
+          'div',
+          { className: 'dr-legado-empty' },
+          h('span', { className: 'dr-legado-empty-icon' }, '🤔'),
+          h('span', null, '没有搜到'),
+          h('span', null, '换个关键词，或去「书源」页看看源是不是被停用了'),
+        )
         : h(
+          'div',
+          { className: 'dr-legado-count' },
+          `找到 ${results.length} 本`,
+        ),
+        results === null || results.length === 0
+          ? null
+          : h(
           'ul',
           { className: 'dr-legado-list' },
           results.map((item) => {
@@ -283,7 +302,13 @@ export function LegadoPanel(props) {
     sources === null
       ? h('p', { className: 'dr-note' }, '正在读书源…')
       : sources.length === 0
-        ? h('p', { className: 'dr-note' }, '还没有书源。导入一个之后就能在「搜索」页搜书。')
+        ? h(
+          'div',
+          { className: 'dr-legado-empty' },
+          h('span', { className: 'dr-legado-empty-icon' }, '📚'),
+          h('span', null, '还没有书源'),
+          h('span', null, '导入一个之后就能在「搜索」页搜书'),
+        )
         : h(
           'ul',
           { className: 'dr-legado-list' },
@@ -327,17 +352,31 @@ export function LegadoPanel(props) {
         ),
   )
 
+  // 必须套 .dr-modal-mask：.dr-modal 自己不带定位，只靠 mask 的 flex 居中。
+  // 上一版直接渲染 .dr-modal，结果整个弹窗按普通文档流排到左下角，只露一个角。
   return h(
     'div',
-    { className: 'dr-modal dr-legado-modal', role: 'dialog', 'aria-label': '书源' },
+    {
+      className: 'dr-modal-mask',
+      role: 'presentation',
+      onClick: (event) => {
+        if (event.target === event.currentTarget && typeof props.onClose === 'function') props.onClose()
+      },
+    },
     h(
       'div',
-      { className: 'dr-modal-card dr-legado-card' },
+      { className: 'dr-modal dr-legado-card', role: 'dialog', 'aria-label': '书源' },
       h(
         'header',
         { className: 'dr-modal-head' },
-        h('h2', null, '书源'),
-        h('button', { type: 'button', className: 'dr-icon-btn', 'aria-label': '关闭', onClick: props.onClose }, '×'),
+        h(
+          'div',
+          null,
+          h('h2', null, '书源'),
+          h('div', { className: 'dr-legado-sub-head' }, '用自己的书源搜书、把书加进书架。插件不带源。'),
+        ),
+        h('div', { className: 'dr-grow' }),
+        h('button', { type: 'button', className: 'dr-iconbtn', 'aria-label': '关闭', onClick: props.onClose }, '×'),
       ),
       h(
         'div',
