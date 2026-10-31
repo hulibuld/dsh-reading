@@ -1352,9 +1352,10 @@ const CSS = `
 }
 .dr-filter-select {
   width: auto;
-  min-width: 96px;
-  padding: 5px 8px;
-  font-size: 12.5px;
+  min-width: 122px;
+  height: 34px;
+  padding: 7px 10px;
+  font-size: 13.5px;
 }
 .dr-filters-count {
   font-size: 11.5px;
@@ -2368,13 +2369,156 @@ export const CSS_DISTILL = `
 .dr-dist-foot { font-size: 10.5px; line-height: 1.5; color: var(--dsw-alias-label-quaternary, #8a8a8a); }
 `
 
+
+/**
+ * 书架上的大按钮（0.9.0）。
+ *
+ * 「全部书籍 / 书源 / 导入图书」这三个是书架的入口，按基础按钮的 28px 高太挤，
+ * 鼠标要瞄着点。抬到 34px，字号跟着上一档 —— 放大是为了好点，不是为了好看。
+ */
+export const CSS_SHELF_BUTTONS = `
+.dr-btn.dr-btn-lg {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13.5px;
+}
+.dr-filters-btn {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13.5px;
+  margin-left: auto;
+}
+@media (max-width: 720px) {
+  .dr-filter-select,
+  .dr-btn.dr-btn-lg,
+  .dr-filters-btn { height: 40px; font-size: 14.5px; }
+  .dr-filter-select { min-width: 0; flex: 1 1 130px; }
+  .dr-filters-btn { margin-left: 0; flex: 1 1 auto; }
+}
+`
+
+/** 阅读设置里的分组标题（0.9.0）。 */
+export const CSS_SETTINGS_GROUPS = `
+.dr-set-group {
+  margin: 14px 0 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+}
+.dr-set-group:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+`
+
+/**
+ * 书源面板（0.9.0）。
+ *
+ * 沿用现有弹窗与按钮的观感，不引入新颜色。列表行是「左信息右动作」的两列，
+ * 名字一行、来源与作者一行、最新章节一行，扫视的时候从粗到细。
+ */
+export const CSS_LEGADO = `
+.dr-filters-btn { margin-left: auto; }
+.dr-legado-modal { align-items: center; justify-content: center; }
+.dr-legado-card {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dr-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+}
+.dr-tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 9px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.dr-tab.is-on {
+  color: var(--dsw-alias-label-primary, #22262b);
+  border-bottom-color: var(--dsw-alias-brand-primary, #4a7);
+  font-weight: 600;
+}
+.dr-legado-body {
+  padding: 14px 16px 18px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dr-legado-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.dr-legado-row .dr-input { flex: 1 1 220px; min-width: 0; }
+.dr-legado-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.dr-legado-file { position: relative; overflow: hidden; cursor: pointer; }
+.dr-legado-file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.dr-legado-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.dr-legado-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+  border-radius: var(--dsw-radius-md, 8px);
+  background: var(--dsw-alias-bg-primary, #fff);
+}
+.dr-legado-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dr-legado-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, #22262b); }
+.dr-legado-meta {
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dr-legado-sub {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dr-legado-item .dr-btn { flex: 0 0 auto; align-self: center; }
+.dr-legado-failures { font-size: 11.5px; color: var(--dsw-alias-label-secondary, #5b6069); }
+.dr-legado-failures ul { margin: 6px 0 0; padding-left: 18px; }
+.dr-note-ok {
+  color: var(--dsw-alias-label-primary, #22262b);
+  border-left: 2px solid var(--dsw-alias-brand-primary, #4a7);
+  padding-left: 8px;
+}
+.dr-note-error {
+  color: var(--dsw-alias-label-primary, #22262b);
+  border-left: 2px solid #c0392b;
+  padding-left: 8px;
+}
+@media (max-width: 720px) {
+  .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsw-radius-none, 0); }
+  .dr-legado-item { flex-direction: column; align-items: stretch; }
+  .dr-legado-item .dr-btn { width: 100%; }
+}
+`
+
 /**
  * 取整份 CSS 文本（用于测试和调试；正常渲染走 ensureStyle）。
  * 拼接顺序有语义：基础样式在前，v0.6.0 增量在后 —— 后写的规则覆盖先写的。
  * @returns {string}
  */
 export function cssText() {
-  return CSS + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL
+  return CSS + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO
 }
 
 /**

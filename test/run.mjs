@@ -38,6 +38,7 @@ const SUITES = [
   'routes_test.mjs',
   // 「找书」纯函数层（模板拼接 / 候选抽取 / 文件名猜测，不联网）
   'source_test.mjs',
+  'legado_test.mjs',
   'shelf_ui_test.mjs',
   'layout_css_test.mjs',
   'search_test.mjs',

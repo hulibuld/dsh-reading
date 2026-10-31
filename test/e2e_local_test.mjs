@@ -741,6 +741,57 @@ export default async function run() {
     const noAi = await call(handler2, postJson(`${API_PREFIX}/distill.chapter`, { bookHash: dirName, href: 'text/ch1.xhtml' }))
     assert.equal(noAi.statusCode, 503, `没有 AI 时蒸馏应当 503，实际 ${noAi.statusCode}`)
     assert.equal(noAi.json().ok, false, '失败信封必须是 ok:false')
+
+    // 14) Legado 书源（0.9.0）：导入 → 列表 → 停用 → 删除；全程不联网。
+    const emptySources = okValue(await call(handler2, postJson(`${API_PREFIX}/source.legado.list`, {})), 'legado.list 初始')
+    assert.deepEqual(emptySources.sources, [], '新书库没有书源')
+
+    const sourceJson = JSON.stringify([{
+      bookSourceUrl: 'https://demo.invalid',
+      bookSourceName: '测试源',
+      searchUrl: '/search?key={{key}}&page={{page}}',
+      ruleSearch: { bookList: 'class.item', name: 'tag.a@text', bookUrl: 'tag.a@href' },
+      ruleToc: { chapterList: 'class.toc@tag.a', chapterName: 'tag.a@text', chapterUrl: 'tag.a@href' },
+      ruleContent: { content: '@css:#content@html' },
+    }])
+    const importedSources = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/source.legado.import`, { json: sourceJson })),
+      'legado.import',
+    )
+    assert.equal(importedSources.added, 1, '应当新增一个书源')
+    assert.equal(importedSources.total, 1)
+
+    const sourceListed = okValue(await call(handler2, postJson(`${API_PREFIX}/source.legado.list`, {})), 'legado.list')
+    assert.equal(sourceListed.sources.length, 1)
+    assert.equal(sourceListed.sources[0].name, '测试源')
+    assert.equal(sourceListed.sources[0].enabled, true, '导入后默认启用')
+
+    // 坏 JSON 要有中文拒绝，不能 500
+    const badSource = await call(handler2, postJson(`${API_PREFIX}/source.legado.import`, { json: '[{' }))
+    assert.equal(badSource.statusCode, 400, `坏 JSON 应当 400，实际 ${badSource.statusCode}`)
+    assert.equal(badSource.json().ok, false)
+
+    // 不存在的书源上「加入书架」要明确报错（不联网、不写盘）
+    const noSource = await call(handler2, postJson(`${API_PREFIX}/book.addFromSource`, {
+      sourceUrl: 'https://nope.invalid',
+      bookUrl: 'https://demo.invalid/book/1',
+    }))
+    assert.equal(noSource.statusCode, 400, `未知书源应当 400，实际 ${noSource.statusCode}`)
+
+    const toggled = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/source.legado.toggle`, { url: 'https://demo.invalid', enabled: false })),
+      'legado.toggle',
+    )
+    assert.equal(toggled.total, 1)
+    const afterToggle = okValue(await call(handler2, postJson(`${API_PREFIX}/source.legado.list`, {})), 'legado.list 停用后')
+    assert.equal(afterToggle.sources[0].enabled, false, '停用要落盘')
+
+    const removed = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/source.legado.remove`, { url: 'https://demo.invalid' })),
+      'legado.remove',
+    )
+    assert.equal(removed.total, 0, '删除后应清空')
+    assert.equal(noAi.json().ok, false, '失败信封必须是 ok:false')
   } finally {
     await rm(root, { recursive: true, force: true })
   }

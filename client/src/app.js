@@ -225,6 +225,10 @@ function SettingsDrawer(props) {
     if (typeof props.onChange === 'function') props.onChange(patch)
   }
 
+  // 分组标题：Legado 的设置也是这么分的（文字 / 纸张 / 翻页），
+  // 一屏七八个控件不分段，用户找不到「字号在哪」。
+  const group = (label) => h('div', { className: 'dr-set-group' }, label)
+
   return h(
     'div',
     { className: 'dr-drawer', role: 'dialog', 'aria-label': '阅读设置' },
@@ -244,6 +248,7 @@ function SettingsDrawer(props) {
     h(
       'div',
       { className: 'dr-drawer-body' },
+      group('文字'),
       // ── 字体
       h('div', { className: 'dr-field' },
         h('div', { className: 'dr-field-label' }, '字体'),
@@ -312,6 +317,7 @@ function SettingsDrawer(props) {
           )),
         ),
       ),
+      group('纸张'),
       // ── 背景与墨色
       h('div', { className: 'dr-field' },
         h('div', { className: 'dr-field-label' }, '背景'),
@@ -335,6 +341,7 @@ function SettingsDrawer(props) {
           )),
         ),
       ),
+      group('翻页'),
       // ── 翻页动画
       // 有人就是嫌那个 200ms 的滑动碍眼（尤其连着翻很多页时），给个硬开关。
       h(
@@ -1780,16 +1787,18 @@ export function PanelPage(props) {
  * `currentColor` 让它在任何主题下都是「这一行的文字颜色」。
  */
 export function PanelIcon(props) {
-  const size = Number.isFinite(props && props.size) ? props.size : 18
+  const size = Number.isFinite(props && props.size) ? props.size : 20
+  // 视框收一圈：图形本身占不满 24×24，外壳给的尺寸又固定，
+  // 直接放大宽度会和左侧栏那一排图标错位。收紧视框是等尺寸下把书放大。
   return h(
     'svg',
     {
       width: size,
       height: size,
-      viewBox: '0 0 24 24',
+      viewBox: '3.2 3.4 17.6 17.4',
       fill: 'none',
       stroke: 'currentColor',
-      strokeWidth: 1.7,
+      strokeWidth: 1.55,
       strokeLinecap: 'round',
       strokeLinejoin: 'round',
       'aria-hidden': 'true',

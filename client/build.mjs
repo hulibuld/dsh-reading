@@ -47,6 +47,7 @@ const MODULES = [
   'api.js',
   'style.js',
   'search.js',
+  'legado-ui.js',
   'shelf.js',
   'toc.js',
   'ai.js',

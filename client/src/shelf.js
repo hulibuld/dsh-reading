@@ -19,6 +19,7 @@ import {
   resetBookCover,
   updateBook,
 } from './api.js'
+import { LegadoPanel } from './legado-ui.js'
 
 /** 单次导入的界面提示上限：超过这个大小先提醒一句，但不阻止（宿主说了算）。 */
 const BIG_FILE_BYTES = 120 * 1024 * 1024
@@ -1072,6 +1073,7 @@ export function ShelfView(props) {
   const [reloadKey, setReloadKey] = useState(0)
   const [editing, setEditing] = useState(null) // 正在编辑的书；null = 弹窗关着
   const [importOpen, setImportOpen] = useState(false) // 「导入」面板（0.5.1）
+  const [legadoOpen, setLegadoOpen] = useState(false) // 书源面板：搜书、加书（0.9.0）
   const [filterKind, setFilterKind] = useState('all') // 书架筛选维度（0.5.1）
   const [filterValue, setFilterValue] = useState('')
   const [notice, setNotice] = useState('') // 一句话提示，几秒后自己消失
@@ -1220,10 +1222,24 @@ export function ShelfView(props) {
     'button',
     {
       type: 'button',
-      className: 'dr-btn dr-btn-primary',
+      className: 'dr-btn dr-btn-primary dr-btn-lg',
       disabled: importing,
       onClick: () => setImportOpen(true),
     },
+    h('svg', {
+      width: 17,
+      height: 17,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      strokeWidth: 1.8,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      'aria-hidden': 'true',
+    },
+    h('path', { d: 'M4 5.5h6a2 2 0 0 1 2 2v12a2 2 0 0 0-2-2H4z' }),
+    h('path', { d: 'M20 5.5h-6a2 2 0 0 0-2 2v12a2 2 0 0 1 2-2h6z' }),
+    ),
     importing ? '正在导入…' : '导入图书',
   )
 
@@ -1277,6 +1293,16 @@ export function ShelfView(props) {
         '清除筛选',
       )
       : null,
+    h(
+      'button',
+      {
+        type: 'button',
+        className: 'dr-btn dr-filters-btn',
+        onClick: () => setLegadoOpen(true),
+        title: '导入 Legado 书源、按书源搜书',
+      },
+      '书源',
+    ),
     safeBooks.length > 0
       ? h('span', { className: 'dr-filters-count' }, `${visibleBooks.length} / ${safeBooks.length} 本`)
       : null,
@@ -1409,6 +1435,14 @@ export function ShelfView(props) {
         onSaved: onEditSaved,
       })
       : null,
+    h(LegadoPanel, {
+      open: legadoOpen,
+      onClose: () => setLegadoOpen(false),
+      onAdded: () => {
+        reload()
+        setNotice('已加入书架')
+      },
+    }),
     notice !== '' ? h('div', { className: 'dr-toast', role: 'status' }, notice) : null,
   )
 }
