@@ -1370,29 +1370,14 @@ export function ShelfView(props) {
         {
           key: book.bookHash,
           className: 'dr-book-cell',
-          // 右键 = 改这本书的信息。和右上角「✎」是同一个入口，
-          // 但右键更符合「对着这本书操作」的直觉。
+          // 改书名、封面、分类这些，全部走右键。
+          // 卡片上不再挂「✎」按钮：一排六个齿轮看着像表盘，点起来还容易误触。
           onContextMenu: (event) => {
             if (event && typeof event.preventDefault === 'function') event.preventDefault()
             onEdit(book)
           },
         },
         h(BookCard, { book, onOpen: props.onOpen }),
-        h(
-          'button',
-          {
-            type: 'button',
-            className: 'dr-iconbtn',
-            title: '编辑书名和封面',
-            'aria-label': `编辑《${book.title || '未命名'}》的书名和封面`,
-            style: { position: 'absolute', top: 14, right: 46 },
-            onClick: (event) => {
-              event.stopPropagation()
-              onEdit(book)
-            },
-          },
-          '✎',
-        ),
         h(
           'button',
           {

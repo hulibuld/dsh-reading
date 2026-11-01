@@ -2888,46 +2888,8 @@ window.__ModuleLoader__.load({
          「封面大小错乱 / 堆叠」的根因。min-width:0 把最小内容宽度这个闸门关掉。 */
       .dr-book-cell {
         position: relative;
-        /* 卡片右上角的「编辑」按钮绝对定位就挂在这里 */
-      .dr-book-edit {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        z-index: 2;
-        width: 26px;
-        height: 26px;
-        padding: 0;
-        display: grid;
-        place-items: center;
-        border: 1px solid var(--dsw-alias-line-tertiary, #e0ddd6);
-        border-radius: var(--dsw-radius-full, 999px);
-        background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.94));
-        color: #23262d;
-        font-size: 13px;
-        font-weight: 600;
-        line-height: 1;
-        cursor: pointer;
-        box-shadow: 0 1px 4px rgba(23, 26, 33, 0.22);
-        /* 不再默认藏起来：用户找不到就等于没有。悬停时再加强。 */
-        opacity: 0.92;
-        transition: opacity 0.14s, background 0.14s, color 0.14s;
-      }
-      .dr-book-cell:hover .dr-book-edit,
-      .dr-book-edit:focus-visible {
-        opacity: 1;
-        background: #ffffff;
-        border-color: #2f6bdd;
-        color: #2f6bdd;
-      }
-      .dr-book-edit:hover {
-        background: #ffffff;
-        color: #2f6bdd;
-        border-color: #2f6bdd;
-      }
-      /* 触屏没有 hover：编辑按钮常驻，否则永远点不到 */
-      @media (hover: none) {
-        .dr-book-edit { opacity: 1; }
-      }
+        /* 卡片里的按钮都绝对定位挂在这一层（删除键在右上角）。 */
+
         display: flex;
         min-width: 0;
         width: 100%;
@@ -4247,6 +4209,341 @@ window.__ModuleLoader__.load({
        * 每个 var() 都带 fallback，不写主题分支（纸面主题除外，见 A 段的说明）。
        * 全文一律不用 oklch 色彩函数：纸面与高亮都留在 sRGB，老 WebView 也认。
        */
+
+      /**
+       * 设计令牌层（0.9.5）
+       *
+       * 起因：界面一直显得「简陋」——卡片没有边框、面板没有底色、按钮之间没有层次。
+       * 根因不是没写样式，而是颜色全挂在宿主的 `--dsw-alias-*` 上：宿主换主题、或者
+       * 版本不同缺了某个 token，取到的就是透明，边框和底色一起消失。
+       *
+       * 做法：在插件自己的命名空间（`--dsh-reading-ui-*`）里定义一层语义令牌，
+       * 每个令牌都是「宿主 token → 字面色」两级兜底。组件只认这一层，宿主缺什么
+       * 都不会变成透明，最差也是我们定的中性灰。
+       *
+       * 命名不用 `--dr-*`：DSH 的样式审查只放行 `--dsw-alias-*` / `--dsw-radius-*` /
+       * `--dsh-reading-*` 三个前缀，第四个会被构建拦下。
+       */
+      const CSS_TOKENS = `
+      .dr-root,
+      .dr-reader,
+      .dr-side,
+      .dr-modal-mask,
+      .dr-ask-backdrop {
+        /* 表面：底色、浮起层、凹陷层 */
+        --dsh-reading-ui-bg: var(--dsw-alias-bg-base, #ffffff);
+        --dsh-reading-ui-bg-soft: var(--dsw-alias-bg-layer-1, #f7f6f3);
+        --dsh-reading-ui-bg-sink: var(--dsw-alias-bg-layer-2, #efece6);
+        /* 描边：普通与加重。0.5px 在多数屏幕上会被抹掉，一律 1px */
+        --dsh-reading-ui-line: var(--dsw-alias-border-l3, #e2ded5);
+        --dsh-reading-ui-line-strong: var(--dsw-alias-border-l4, #cdc7ba);
+        /* 文字：主、次、弱 */
+        --dsh-reading-ui-ink: var(--dsw-alias-label-primary, #22262b);
+        --dsh-reading-ui-ink-dim: var(--dsw-alias-label-secondary, #5a5f66);
+        --dsh-reading-ui-ink-faint: var(--dsw-alias-label-tertiary, #8b8f96);
+        /* 强调与危险 */
+        --dsh-reading-ui-accent: var(--dsw-alias-brand-primary, #2f6bdd);
+        --dsh-reading-ui-accent-soft: var(--dsw-alias-bg-brand-soft, rgba(47, 107, 221, 0.12));
+        --dsh-reading-ui-danger: var(--dsw-alias-label-danger, #b4362b);
+        /* 圆角：全部回落到宿主 token，缺了就用自己的档 */
+        --dsh-reading-ui-r-sm: var(--dsw-radius-sm, 6px);
+        --dsh-reading-ui-r-md: var(--dsw-radius-md, 10px);
+        --dsh-reading-ui-r-lg: var(--dsw-radius-lg, 14px);
+        /* 阴影：一层贴边、一层浮起。深色主题下靠透明度区分，不写死颜色 */
+        --dsh-reading-ui-shadow-1: 0 1px 2px rgba(23, 26, 33, 0.06), 0 1px 1px rgba(23, 26, 33, 0.04);
+        --dsh-reading-ui-shadow-2: 0 6px 18px rgba(23, 26, 33, 0.10), 0 1px 3px rgba(23, 26, 33, 0.06);
+        /* 间距：4 的倍数，组件只用这几档 */
+        --dsh-reading-ui-gap-1: 4px;
+        --dsh-reading-ui-gap-2: 8px;
+        --dsh-reading-ui-gap-3: 12px;
+        --dsh-reading-ui-gap-4: 16px;
+        --dsh-reading-ui-gap-5: 24px;
+        /* 控件高度：小/常规/大。三档，不要临时写 height */
+        --dsh-reading-ui-h-sm: 26px;
+        --dsh-reading-ui-h-md: 32px;
+        --dsh-reading-ui-h-lg: 38px;
+      }
+      `
+
+      /**
+       * 基础组件层（0.9.5）
+       *
+       * 这一层只做「所有面板都要用一次」的东西：卡片、面板、按钮、输入框、标签、
+       * 空态、分隔线。写完就固定，别处直接用类名，不再各写一套 padding 和边框。
+       *
+       * 拼接位置在 CSS 之后：同优先级下后写覆盖先写，所以这里可以修正旧规则
+       * （例如把 0.5px 的卡片描边统一成 1px 令牌）。
+       */
+      const CSS_BASE = `
+      /* ── 表面 ───────────────────────────────────────────────────── */
+      .dr-card {
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        border: 1px solid var(--dsh-reading-ui-line, #e2ded5);
+        border-radius: var(--dsh-reading-ui-r-lg, 14px);
+        box-shadow: var(--dsh-reading-ui-shadow-1, 0 1px 2px rgba(23, 26, 33, 0.06));
+      }
+      .dr-panel {
+        background: var(--dsh-reading-ui-bg-soft, #f7f6f3);
+        border: 1px solid var(--dsh-reading-ui-line, #e2ded5);
+        border-radius: var(--dsh-reading-ui-r-lg, 14px);
+        padding: var(--dsh-reading-ui-gap-3, 12px);
+      }
+      .dr-well {
+        background: var(--dsh-reading-ui-bg-sink, #efece6);
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        padding: var(--dsh-reading-ui-gap-2, 8px) var(--dsh-reading-ui-gap-3, 12px);
+      }
+
+      /* ── 按钮 ───────────────────────────────────────────────────── */
+      .dr-btn {
+        min-height: var(--dsh-reading-ui-h-md, 32px);
+        padding: 0 var(--dsh-reading-ui-gap-3, 12px);
+        border: 1px solid var(--dsh-reading-ui-line-strong, #cdc7ba);
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        color: var(--dsh-reading-ui-ink, #22262b);
+        box-shadow: var(--dsh-reading-ui-shadow-1, 0 1px 2px rgba(23, 26, 33, 0.06));
+        transition: background 0.12s, border-color 0.12s, transform 0.06s, box-shadow 0.12s;
+      }
+      .dr-btn:hover {
+        background: var(--dsh-reading-ui-bg-soft, #f7f6f3);
+        border-color: var(--dsh-reading-ui-ink-faint, #8b8f96);
+      }
+      .dr-btn:active {
+        transform: translateY(1px);
+        box-shadow: inset 0 1px 3px rgba(23, 26, 33, 0.16);
+      }
+      .dr-btn:focus-visible {
+        outline: 2px solid var(--dsh-reading-ui-accent, #2f6bdd);
+        outline-offset: 1px;
+      }
+      .dr-btn[disabled] {
+        opacity: 0.55;
+        cursor: not-allowed;
+        transform: none;
+      }
+      .dr-btn-primary {
+        border-color: var(--dsh-reading-ui-accent, #2f6bdd);
+        background: var(--dsh-reading-ui-accent, #2f6bdd);
+        color: #ffffff;
+        box-shadow: 0 1px 2px rgba(23, 26, 33, 0.18);
+      }
+      .dr-btn-primary:hover {
+        background: var(--dsh-reading-ui-accent, #2f6bdd);
+        filter: brightness(1.06);
+        border-color: var(--dsh-reading-ui-accent, #2f6bdd);
+      }
+      .dr-btn-ghost {
+        border-color: transparent;
+        background: transparent;
+        box-shadow: none;
+        color: var(--dsh-reading-ui-ink-dim, #5a5f66);
+      }
+      .dr-btn-ghost:hover {
+        background: var(--dsh-reading-ui-bg-sink, #efece6);
+        border-color: transparent;
+      }
+      .dr-btn-danger {
+        border-color: var(--dsh-reading-ui-danger, #b4362b);
+        color: var(--dsh-reading-ui-danger, #b4362b);
+        background: var(--dsh-reading-ui-bg, #ffffff);
+      }
+      .dr-btn-danger:hover {
+        background: var(--dsh-reading-ui-danger, #b4362b);
+        color: #ffffff;
+      }
+      .dr-iconbtn {
+        display: inline-grid;
+        place-items: center;
+        width: var(--dsh-reading-ui-h-md, 32px);
+        height: var(--dsh-reading-ui-h-md, 32px);
+        padding: 0;
+        border: 1px solid var(--dsh-reading-ui-line, #e2ded5);
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        color: var(--dsh-reading-ui-ink-dim, #5a5f66);
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s, border-color 0.12s;
+      }
+      .dr-iconbtn:hover {
+        background: var(--dsh-reading-ui-bg-soft, #f7f6f3);
+        color: var(--dsh-reading-ui-ink, #22262b);
+        border-color: var(--dsh-reading-ui-line-strong, #cdc7ba);
+      }
+
+      /* ── 输入控件 ───────────────────────────────────────────────── */
+      .dr-input,
+      .dr-select,
+      .dr-textarea {
+        box-sizing: border-box;
+        min-height: var(--dsh-reading-ui-h-md, 32px);
+        padding: 0 var(--dsh-reading-ui-gap-2, 8px);
+        border: 1px solid var(--dsh-reading-ui-line-strong, #cdc7ba);
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        color: var(--dsh-reading-ui-ink, #22262b);
+        font-family: inherit;
+        font-size: 12.5px;
+      }
+      .dr-textarea {
+        padding: var(--dsh-reading-ui-gap-2, 8px);
+        min-height: 72px;
+        line-height: 1.6;
+        resize: vertical;
+      }
+      .dr-input:focus,
+      .dr-select:focus,
+      .dr-textarea:focus {
+        outline: none;
+        border-color: var(--dsh-reading-ui-accent, #2f6bdd);
+        box-shadow: 0 0 0 3px var(--dsh-reading-ui-accent-soft, rgba(47, 107, 221, 0.12));
+      }
+      .dr-field { display: flex; flex-direction: column; gap: var(--dsh-reading-ui-gap-1, 4px); }
+      .dr-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--dsh-reading-ui-ink-dim, #5a5f66);
+      }
+      .dr-hint { font-size: 11.5px; color: var(--dsh-reading-ui-ink-faint, #8b8f96); }
+
+      /* ── 标签与计数 ─────────────────────────────────────────────── */
+      .dr-chip,
+      .dr-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        min-height: 24px;
+        padding: 0 var(--dsh-reading-ui-gap-2, 8px);
+        border: 1px solid var(--dsh-reading-ui-line, #e2ded5);
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        color: var(--dsh-reading-ui-ink-dim, #5a5f66);
+        font-size: 11.5px;
+        white-space: nowrap;
+      }
+      .dr-chip[aria-pressed='true'],
+      .dr-chip.is-on {
+        border-color: var(--dsh-reading-ui-accent, #2f6bdd);
+        background: var(--dsh-reading-ui-accent-soft, rgba(47, 107, 221, 0.12));
+        color: var(--dsh-reading-ui-accent, #2f6bdd);
+      }
+      .dr-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 0 6px;
+        min-height: 18px;
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        background: var(--dsh-reading-ui-bg-sink, #efece6);
+        color: var(--dsh-reading-ui-ink-faint, #8b8f96);
+        font-size: 10.5px;
+        font-weight: 600;
+      }
+      .dr-divider {
+        height: 1px;
+        background: var(--dsh-reading-ui-line, #e2ded5);
+        border: 0;
+        margin: var(--dsh-reading-ui-gap-3, 12px) 0;
+      }
+
+      /* ── 列表行 ─────────────────────────────────────────────────── */
+      .dr-list { display: flex; flex-direction: column; gap: var(--dsh-reading-ui-gap-1, 4px); }
+      .dr-list-row {
+        display: flex;
+        align-items: center;
+        gap: var(--dsh-reading-ui-gap-2, 8px);
+        padding: var(--dsh-reading-ui-gap-2, 8px) var(--dsh-reading-ui-gap-3, 12px);
+        border: 1px solid transparent;
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        background: transparent;
+        width: 100%;
+        text-align: left;
+        font-family: inherit;
+        color: inherit;
+        cursor: pointer;
+      }
+      .dr-list-row:hover {
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        border-color: var(--dsh-reading-ui-line, #e2ded5);
+      }
+
+      /* ── 空态 ───────────────────────────────────────────────────── */
+      .dr-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: var(--dsh-reading-ui-gap-2, 8px);
+        padding: var(--dsh-reading-ui-gap-5, 24px) var(--dsh-reading-ui-gap-4, 16px);
+        color: var(--dsh-reading-ui-ink-faint, #8b8f96);
+        text-align: center;
+      }
+
+      /* ── 细节对齐：页头、进度条、封面厚度 ───────────────────────── */
+      /* 页头原来是 0.5px 描边 + 层级底色，在浅色主题里等于看不见分隔。
+         改成 1px 令牌线，页头和内容才分开。 */
+      .dr-head {
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        border-bottom: 1px solid var(--dsh-reading-ui-line, #e2ded5);
+      }
+      .dr-head-title {
+        color: var(--dsh-reading-ui-ink, #22262b);
+        font-weight: 600;
+      }
+      .dr-head-sub {
+        color: var(--dsh-reading-ui-ink-faint, #8b8f96);
+      }
+      /* 进度条 3px 太细，缩略图上像一条灰缝 */
+      .dr-progress {
+        height: 4px;
+        background: var(--dsh-reading-ui-bg-sink, #efece6);
+      }
+      .dr-progress-fill {
+        background: var(--dsh-reading-ui-accent, #2f6bdd);
+      }
+      /* 封面：给一层极薄的内描边，纸色封面不会和卡片底色糊在一起 */
+      .dr-cover {
+        box-shadow: inset 0 0 0 1px rgba(23, 26, 33, 0.06);
+      }
+      .dr-book-meta {
+        color: var(--dsh-reading-ui-ink-faint, #8b8f96);
+      }
+
+      /* ── 书架：筛选条做成一条工具栏，不再贴边 ───────────────────── */
+      .dr-filters {
+        padding: var(--dsh-reading-ui-gap-2, 8px) var(--dsh-reading-ui-gap-3, 12px);
+        margin: 0 var(--dsh-reading-ui-gap-1, 4px) var(--dsh-reading-ui-gap-3, 12px);
+        /* 用凹陷层而不是浮起层：浅色主题里两种情况都接近白，只有凹陷层跟卡片
+           和白底拉开一点点，才看得见「这是一条工具栏」而不是几张悬空的按钮。 */
+        background: var(--dsh-reading-ui-bg-sink, #efece6);
+        border: 1px solid var(--dsh-reading-ui-line-strong, #cdc7ba);
+        border-radius: var(--dsh-reading-ui-r-lg, 14px);
+        box-shadow: var(--dsh-reading-ui-shadow-1, 0 1px 2px rgba(23, 26, 33, 0.06));
+      }
+      /* 工具栏里的按钮和下拉回到白底：整条是凹陷的，控件再凹陷就浑成一团 */
+      /* 书源键是主入口，有自己的深色底，别被这条一起刷白（白底白字=看不见） */
+      .dr-filters .dr-btn:not(.dr-filters-btn),
+      .dr-filters .dr-filter-select {
+        background: var(--dsh-reading-ui-bg, #ffffff);
+      }
+      /* 卡片：0.5px 描边在多数屏幕上等于没有，统一成 1px 令牌 + 一层贴边阴影 */
+      .dr-book {
+        border: 1px solid var(--dsh-reading-ui-line, #e2ded5);
+        border-radius: var(--dsh-reading-ui-r-lg, 14px);
+        background: var(--dsh-reading-ui-bg, #ffffff);
+        box-shadow: var(--dsh-reading-ui-shadow-1, 0 1px 2px rgba(23, 26, 33, 0.06));
+        transition: border-color 0.12s, transform 0.10s, box-shadow 0.12s;
+      }
+      .dr-book:hover {
+        border-color: var(--dsh-reading-ui-accent, #2f6bdd);
+        box-shadow: var(--dsh-reading-ui-shadow-2, 0 6px 18px rgba(23, 26, 33, 0.10));
+        transform: translateY(-2px);
+      }
+      .dr-cover {
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        box-shadow: inset 0 0 0 1px rgba(23, 26, 33, 0.06);
+      }
+      `
+
       const CSS_V060 = `
       /* ═══════════════════ A. 高亮五色跟随纸面主题 ═══════════════════
          问题：HIGHLIGHT_COLORS 的五色是固定浅色 rgba，叠在夜间纸面上会把浅灰正文洗掉，
@@ -5368,7 +5665,7 @@ window.__ModuleLoader__.load({
       }
       `
 
-        return CSS + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL
+        return CSS_TOKENS + CSS + CSS_BASE + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL
       }
 
       /**
@@ -7977,29 +8274,14 @@ window.__ModuleLoader__.load({
               {
                 key: book.bookHash,
                 className: 'dr-book-cell',
-                // 右键 = 改这本书的信息。和右上角「✎」是同一个入口，
-                // 但右键更符合「对着这本书操作」的直觉。
+                // 改书名、封面、分类这些，全部走右键。
+                // 卡片上不再挂「✎」按钮：一排六个齿轮看着像表盘，点起来还容易误触。
                 onContextMenu: (event) => {
                   if (event && typeof event.preventDefault === 'function') event.preventDefault()
                   onEdit(book)
                 },
               },
               h(BookCard, { book, onOpen: props.onOpen }),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dr-iconbtn',
-                  title: '编辑书名和封面',
-                  'aria-label': `编辑《${book.title || '未命名'}》的书名和封面`,
-                  style: { position: 'absolute', top: 14, right: 46 },
-                  onClick: (event) => {
-                    event.stopPropagation()
-                    onEdit(book)
-                  },
-                },
-                '✎',
-              ),
               h(
                 'button',
                 {

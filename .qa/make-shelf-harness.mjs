@@ -10,7 +10,6 @@ const book = (i, title, author, pct) => `
       <span class="dr-progress"><span class="dr-progress-fill" style="width:${pct}%"></span></span>
       <span class="dr-book-pct">已读 ${pct}%</span>
     </button>
-    <button type="button" class="dr-book-edit" title="编辑">✎</button>
   </div>`
 
 const books = [
