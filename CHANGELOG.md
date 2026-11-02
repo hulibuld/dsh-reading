@@ -166,6 +166,30 @@
   Windows 上目标被杀毒/索引器短暂占用会抛 `EPERM/EBUSY/EACCES`，表现为「保存进度失败」。
   现在 `renameWithRetry` 退避重试 3 次（20/40/60ms），仍失败先删目标再改名。
 
+## [0.9.6] - 2026-11-02
+
+随插件带一个 DSH skill，聊天里说「陪读」就能被载入。
+
+### 新增
+
+- **陪读教练 skill（`reading-coach`）**：`skills/reading-coach/SKILL.md` 与两份 references
+  （问题设计、卡片模板）。七步流程：确认范围 → 确定问题数 → 一次一问按层次递进 → 答偏了
+  指出并重问 → 五维知识卡片 → 落盘到书库 `coach/` 目录 → 可选访谈。第五维「原句」必须
+  逐字抄并标章节，没有合适句子就明说没有。
+- **`lib/coachskill.js`**：拆 frontmatter、读 SKILL.md、注册到宿主的 skills 服务。宿主没有
+  这个服务时返回 `false` 静默跳过——陪读是可选功能，不能因为它把阅读器拖成不加载。
+- **`docs/20-陪读教练skill.md`**：流程、取正文的三种来源、文件位置、改法与出处。
+
+### 变更
+
+- `package.json` 的 `files` 白名单加 `skills`。漏了这一条，本地测试全绿、装到别人机器上
+  这个 skill 会消失。
+
+### 测试
+
+- `test/coach_skill_test.mjs` 七项：解析、references 在位、四种非法 frontmatter 各自报错、
+  无服务时返回 false、有服务时注册参数与 `ctx.effect`、发布白名单、入口真的调了注册。
+
 ## [0.9.5] - 2026-11-01
 
 ### 新增
