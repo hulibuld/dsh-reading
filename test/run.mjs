@@ -43,6 +43,7 @@ const SUITES = [
   'layout_css_test.mjs',
   'search_test.mjs',
   'meta_test.mjs',
+  'coach_skill_test.mjs',
   'ai_test.mjs',
   'aimodel_test.mjs',
   'distill_ui_test.mjs',
