@@ -372,10 +372,16 @@ function assertStyleTokens() {
     }
   }
 
-  // 圆角值只允许走 --dsw-radius-* 或者规范里的固定例外（0 / 0.5px 边框不在此列）
+  // 圆角值只允许走 token（宿主 --dsw-radius-* 或插件自己的 --dsh-reading-ui-r-*），
+  // 或者规范里的固定例外（圆形 50% / 胶囊 999px）。
+  // 0.9.5 引入设计令牌层后，组件圆角写成 `var(--dsh-reading-ui-r-md, 10px)`，
+  // 里面已经包着 --dsw-radius-* 的兜底链，所以这里放行该前缀。
   const literalRadii = [...css.matchAll(/border-radius:\s*([^;]+);/g)]
     .map((m) => m[1].trim())
-    .filter((value) => !value.includes('var(--dsw-radius-') && !value.startsWith('50%') && !value.startsWith('999px'))
+    .filter((value) => !value.includes('var(--dsw-radius-')
+      && !value.includes('var(--dsh-reading-ui-r-')
+      && !value.startsWith('50%')
+      && !value.startsWith('999px'))
   assert.equal(
     literalRadii.length,
     0,

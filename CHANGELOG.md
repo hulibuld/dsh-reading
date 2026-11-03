@@ -166,6 +166,31 @@
   Windows 上目标被杀毒/索引器短暂占用会抛 `EPERM/EBUSY/EACCES`，表现为「保存进度失败」。
   现在 `renameWithRetry` 退避重试 3 次（20/40/60ms），仍失败先删目标再改名。
 
+## [0.9.5] - 2026-11-01
+
+### 新增
+- **设计令牌层 + 基础组件层**（`client/src/style.js` 顶部新增 `CSS_TOKENS` 与
+  `CSS_BASE`）。令牌全部落在 `--dsh-reading-ui-*` 命名空间，每个都带三级兜底：
+  宿主语义 token → 宿主圆角 token → 写死的值。宿主换届或换主题时，边框和底色
+  仍然出现，不会再退化成「一片看不见的白」。
+- 基础组件：`.dr-card` `.dr-panel` `.dr-well` `.dr-btn`（含 primary/ghost/danger）
+  `.dr-iconbtn` `.dr-input/.dr-select/.dr-textarea` `.dr-chip/.dr-tag/.dr-badge`
+  `.dr-list-row` `.dr-empty` `.dr-divider`。
+
+### 变更
+- 书架筛选条改成一条真正的工具栏：凹陷底色 + 1px 描边 + 圆角，左右各留 17px
+  内边距，「书源」不再贴屏幕边缘。
+- 页头分隔线从 0.5px 提到 1px 令牌线；进度条 3px→4px；封面加一层极薄内描边。
+- 卡片描边统一成 1px（原来 0.5px 在多数屏幕等于没有）。
+
+### 删除
+- 书卡右上角的「✎」按钮去掉了。改书名、封面、分类、系列、标签一律走右键，
+  一排六个齿轮既挡封面又容易误触。
+
+### 测试
+- `test/client_build_test.mjs` 的圆角守卫放行 `var(--dsh-reading-ui-r-*)`：
+  令牌层是把 `--dsw-radius-*` 包在里面的，守卫原来只认直接调用。
+
 ## [0.9.4] - 2026-11-01
 
 ### 新增
