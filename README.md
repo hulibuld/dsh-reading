@@ -86,6 +86,10 @@ npm run verify
 
 改界面后要在 DSH 里实际点一遍。node 测试只覆盖逻辑和产物形状，布局和滚动靠眼睛。
 
+## 已知问题与修复记录
+
+累计的修复、现象、原因与修法记在 [docs/FIXES.md](docs/FIXES.md)。以后每修一次加一行，别攒着。
+
 ## 许可
 
 GPL-3.0-or-later。`client/vendor/epubcfi.foliate.js` 是 foliate-js 的原样副本，MIT，随仓库分发。运行时不依赖任何 npm 包。
