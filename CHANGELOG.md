@@ -166,6 +166,20 @@
   Windows 上目标被杀毒/索引器短暂占用会抛 `EPERM/EBUSY/EACCES`，表现为「保存进度失败」。
   现在 `renameWithRetry` 退避重试 3 次（20/40/60ms），仍失败先删目标再改名。
 
+## [0.9.7] - 2026-11-06
+
+### 修复
+- **「导入图书」白字白底看不见**。根因不是颜色写错，是 `background:` 简写不会清掉
+  `background-image`：早期 `.dr-btn` 那条白色渐变（`--dsw-alias-bg-layer-*`）在宿主把层色
+  定义为白色时会盖在实心蓝上，字还是白的。现在 `.dr-btn` 与 `.dr-btn-primary` 都显式
+  `background-image: none`。
+- **主按钮不再吃宿主品牌色**：新增自持令牌 `--dsh-reading-ui-accent-fill/​-ink`（纯字面色，
+  不引用 `--dsw-*`）。宿主的 brand 在部分主题里是浅蓝，配白字直接糊成一片。
+
+### 测试
+- 新增 `test/contrast_test.mjs`（5 项）：主按钮颜色自持、`background-image: none`、
+  主按钮对比度 ≥ 4.5、深色主入口 ≥ 7、筛选条规则不许顺手把文字刷白。
+
 ## [0.9.6] - 2026-11-02
 
 随插件带一个 DSH skill，聊天里说「陪读」就能被载入。
