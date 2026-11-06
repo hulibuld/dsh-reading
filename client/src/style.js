@@ -1606,6 +1606,15 @@ const CSS_TOKENS = `
   --dsh-reading-ui-ink-faint: var(--dsw-alias-label-tertiary, #8b8f96);
   /* 强调与危险 */
   --dsh-reading-ui-accent: var(--dsw-alias-brand-primary, #2f6bdd);
+  /* 主按钮的实心填充：**故意不引用宿主 token**。
+     宿主的 brand-primary 在部分主题里是浅蓝色，配白字直接看不见（用户报过
+     「导入图书白字白底」）。主按钮是每屏都要点的东西，颜色必须自己兜住。 */
+  --dsh-reading-ui-accent-fill: #2f6bdd;
+  --dsh-reading-ui-accent-fill-hover: #2a60cd;
+  --dsh-reading-ui-accent-ink: #ffffff;
+  /* 深色主入口（书源）：同样是自持色，不吃主题 */
+  --dsh-reading-ui-ink-fill: #333842;
+  --dsh-reading-ui-ink-fill-hover: #23262d;
   --dsh-reading-ui-accent-soft: var(--dsw-alias-bg-brand-soft, rgba(47, 107, 221, 0.12));
   --dsh-reading-ui-danger: var(--dsw-alias-label-danger, #b4362b);
   /* 圆角：全部回落到宿主 token，缺了就用自己的档 */
@@ -1664,6 +1673,10 @@ const CSS_BASE = `
   border: 1px solid var(--dsh-reading-ui-line-strong, #cdc7ba);
   border-radius: var(--dsh-reading-ui-r-md, 10px);
   background: var(--dsh-reading-ui-bg, #ffffff);
+  /* 关键：把早期 .dr-btn 留下的白色渐变清掉。
+     background 简写不会清 background-image，宿主把 --dsw-alias-bg-layer-* 定义成白色时，
+     那层白渐变会盖在实心色上——「导入图书」白字白底就是它造成的。 */
+  background-image: none;
   color: var(--dsh-reading-ui-ink, #22262b);
   box-shadow: var(--dsh-reading-ui-shadow-1, 0 1px 2px rgba(23, 26, 33, 0.06));
   transition: background 0.12s, border-color 0.12s, transform 0.06s, box-shadow 0.12s;
@@ -1686,15 +1699,19 @@ const CSS_BASE = `
   transform: none;
 }
 .dr-btn-primary {
-  border-color: var(--dsh-reading-ui-accent, #2f6bdd);
-  background: var(--dsh-reading-ui-accent, #2f6bdd);
-  color: #ffffff;
+  /* 三个属性都用自持令牌：背景、文字、描边都不取决于宿主主题、
+     也不受上面 .dr-btn 的 background 简写影响（同优先级，后写覆盖）。 */
+  border-color: var(--dsh-reading-ui-accent-fill, #2f6bdd);
+  background: var(--dsh-reading-ui-accent-fill, #2f6bdd);
+  background-image: none;
+  color: var(--dsh-reading-ui-accent-ink, #ffffff);
   box-shadow: 0 1px 2px rgba(23, 26, 33, 0.18);
 }
 .dr-btn-primary:hover {
-  background: var(--dsh-reading-ui-accent, #2f6bdd);
-  filter: brightness(1.06);
-  border-color: var(--dsh-reading-ui-accent, #2f6bdd);
+  background: var(--dsh-reading-ui-accent-fill-hover, #2a60cd);
+  background-image: none;
+  border-color: var(--dsh-reading-ui-accent-fill-hover, #2a60cd);
+  color: var(--dsh-reading-ui-accent-ink, #ffffff);
 }
 .dr-btn-ghost {
   border-color: transparent;

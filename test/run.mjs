@@ -41,6 +41,7 @@ const SUITES = [
   'legado_test.mjs',
   'shelf_ui_test.mjs',
   'layout_css_test.mjs',
+  'contrast_test.mjs',
   'search_test.mjs',
   'meta_test.mjs',
   'coach_skill_test.mjs',
