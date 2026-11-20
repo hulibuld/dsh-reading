@@ -37,6 +37,7 @@ export function LegadoPanel(props) {
   const [sources, setSources] = React.useState(null)
   const [sourceError, setSourceError] = React.useState('')
   const [importText, setImportText] = React.useState('')
+  const [importUrl, setImportUrl] = React.useState('')
   const [importing, setImporting] = React.useState(false)
   const [adding, setAdding] = React.useState('')
   const [added, setAdded] = React.useState([])
@@ -100,6 +101,32 @@ export function LegadoPanel(props) {
       if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
       setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
       setImportText('')
+      await reloadSources()
+    } catch (err) {
+      setSourceError(errorText(err))
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  // 贴链接：服务端替你把 JSON 抓下来再解析，用户不用先存文件、也不用复制几兆文本。
+  const doImportUrl = async () => {
+    const link = importUrl.trim()
+    if (link === '') {
+      setSourceError('先把书源 JSON 的链接贴进来。')
+      return
+    }
+    setImporting(true)
+    setSourceError('')
+    try {
+      const data = await call('source.legado.import', { url: link })
+      const rejected = Array.isArray(data?.rejected) ? data.rejected : []
+      const parts = []
+      if (data?.added) parts.push(`新增 ${data.added} 个`)
+      if (data?.updated) parts.push(`更新 ${data.updated} 个`)
+      if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
+      setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
+      setImportUrl('')
       await reloadSources()
     } catch (err) {
       setSourceError(errorText(err))
@@ -261,7 +288,33 @@ export function LegadoPanel(props) {
       'details',
       { className: 'dr-legado-import', open: sources !== null && sources.length === 0 },
       h('summary', null, '导入书源'),
-      h('p', { className: 'dr-note' }, 'Legado「网络导入」拿到的 JSON，整包粘进来就行；一个包里几十上百个源都能一次导入。'),
+      h('p', { className: 'dr-note' }, '最省事的是贴链接：书源 JSON 的地址（通常是 .json 结尾）直接粘进来，插件替你去下载。'),
+      h(
+        'div',
+        { className: 'dr-legado-row' },
+        h('input', {
+          type: 'url',
+          className: 'dr-input',
+          placeholder: 'https://example.com/sources/xxxx.json',
+          value: importUrl,
+          'aria-label': '书源 JSON 链接',
+          onChange: (event) => setImportUrl(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === 'Enter') doImportUrl()
+          },
+        }),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-btn dr-btn-primary',
+            disabled: importing,
+            onClick: doImportUrl,
+          },
+          importing ? '导入中…' : '从链接导入',
+        ),
+      ),
+      h('p', { className: 'dr-note' }, '另一种给法：Legado「网络导入」拿到的 JSON 整包粘在下面，或者选一个 .json 文件。'),
       h('textarea', {
         className: 'dr-input dr-legado-textarea',
         rows: 6,

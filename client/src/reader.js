@@ -27,6 +27,7 @@
 import { assetUrl, chapterUrl, humanizeError } from './api.js'
 import * as CFI from './cfi.js'
 import { statusSummary } from './ai.js'
+import { frameMetrics } from './reader-metrics.js'
 
 /**
  * 注入节点的标记。**从 cfi.js 取，不要另写字面量**：
@@ -599,52 +600,23 @@ export function ReaderView(props) {
     : ''
 
   /**
-   * 把几何量算出来：列宽 = iframe 视口宽，间距固定。
+   * 把几何量算出来：列宽 = iframe 视口宽，列高 = iframe 视口高。
    *
-   * 这里量错一次就得整章重排，所以取多路测量的最大值：iframe 的 clientWidth、
-   * 它的 border-box 宽、外层视口宽。面板刚挂载（隐藏、宽度未落定）时前两者可能是 0，
-   * 外层视口往往已经有正确宽度；再兜一个「上一次量到的好值」，避免退化成 120px 的
-   * 窄条 —— 那正是「三个字一行、字只占屏幕左半边」的样子。
+   * 量错一次就得整章重排，所以量法有讲究（细节见 client/src/reader-metrics.js）：
+   * 优先用 iframe 自己的尺寸，量不到才退回外层视口并扣掉它的内边距。
+   * 外层是带留白的盒子，直接拿它的高度当列高，每页最后一行会被裁掉。
    */
   const geometry = useCallback(() => {
-    const frame = frameRef.current
-    const viewport = viewportRef.current
-    const candidates = []
-    if (frame) {
-      candidates.push(Number(frame.clientWidth) || 0)
-      const box = typeof frame.getBoundingClientRect === 'function' ? frame.getBoundingClientRect() : null
-      if (box) candidates.push(Number(box.width) || 0)
-    }
-    if (viewport) {
-      candidates.push(Number(viewport.clientWidth) || 0)
-      const vbox = typeof viewport.getBoundingClientRect === 'function' ? viewport.getBoundingClientRect() : null
-      if (vbox) candidates.push(Number(vbox.width) || 0)
-    }
-    let width = Math.floor(Math.max(0, ...candidates))
-    if (width < 200) {
-      const last = Number(lastWidthRef.current) || 0
-      if (last >= 200) width = last
-    }
+    // 量法本身在 client/src/reader-metrics.js，那边有注释与单测：
+    // 列高必须取 iframe 自己的高度，外层视口含上下内边距，直接拿来当列高
+    // 会让每页最后一行被裁在视口外面。
+    const measured = frameMetrics(frameRef.current, viewportRef.current, {
+      width: lastWidthRef.current,
+      height: lastHeightRef.current,
+    })
+    const width = measured.width
+    const height = measured.height
     if (width >= 200) lastWidthRef.current = width
-
-    // 高度同理：分页用的是「一列能装多高」，量不到高度时多栏退化成单栏，
-    // 读数会变成「这一章只有一页」—— 正文其实被排在首屏下面，永远翻不到。
-    const heightCandidates = []
-    if (frame) {
-      heightCandidates.push(Number(frame.clientHeight) || 0)
-      const box = typeof frame.getBoundingClientRect === 'function' ? frame.getBoundingClientRect() : null
-      if (box) heightCandidates.push(Number(box.height) || 0)
-    }
-    if (viewport) {
-      heightCandidates.push(Number(viewport.clientHeight) || 0)
-      const vbox = typeof viewport.getBoundingClientRect === 'function' ? viewport.getBoundingClientRect() : null
-      if (vbox) heightCandidates.push(Number(vbox.height) || 0)
-    }
-    let height = Math.floor(Math.max(0, ...heightCandidates))
-    if (height < 200) {
-      const last = Number(lastHeightRef.current) || 0
-      if (last >= 200) height = last
-    }
     if (height >= 200) lastHeightRef.current = height
 
     // 栏间距按视口宽度的比例算：48px 写死时，窄屏（约 600px）两栏之间空出一大条，
@@ -1715,22 +1687,24 @@ export function ReaderView(props) {
         qaCount > 0 ? h('span', { className: 'dr-toc-badge' }, qaCount > 99 ? '99+' : String(qaCount)) : null,
       )
       : null,
-    // 读书蒸馏入口：常驻一个按钮，一次点击直达（有成果时带条数）
-    typeof props.onOpenDistill === 'function'
+    // 「笔记」：把这本书的蒸馏要点、我的批注、问过的讨论写进 Obsidian。
+    // 放在「问答」右边——它写的东西大半来自那些问答，两个按钮挨着才好理解。
+    typeof props.onToggleSide === 'function'
       ? h(
         'button',
         {
           type: 'button',
-          className: 'dr-btn dr-btn-sm dr-distill-entry',
-          title: props.distillDone > 0 ? `读书蒸馏 · 已蒸 ${props.distillDone} 章` : '读书蒸馏：把这本书变成能带走的笔记',
-          'aria-label': '读书蒸馏',
-          'aria-pressed': props.sideKind === 'distill' ? 'true' : 'false',
-          onClick: props.onOpenDistill,
+          className: 'dr-iconbtn',
+          title: '读书笔记（写进 Obsidian）',
+          'aria-label': '读书笔记',
+          'aria-pressed': props.sideKind === 'companion' ? 'true' : 'false',
+          onClick: () => props.onToggleSide('companion'),
         },
-        '蒸馏',
-        props.distillDone > 0 ? h('span', { className: 'dr-toc-badge' }, String(props.distillDone)) : null,
+        '笔记',
       )
       : null,
+    // 读书蒸馏入口已经搬到书架：书卡上的「⋯」或右键打开信息弹窗，那里有「读书蒸馏」。
+    // 阅读器里不再常驻这个按钮——读的时候用不到，还占走一个工具栏位置。
     // AI 状态点：一眼看出「现在能不能用」。绿色可用、黄色最近失败、红色配置不通。
     // 点开是「AI 状态」面板——那里才有四道检查与最近调用账本。
     typeof props.onOpenAi === 'function'

@@ -17,10 +17,12 @@ import {
   humanizeError,
   putBookCover,
   resetBookCover,
+  setBookLayout,
   updateBook,
 } from './api.js'
 import { LegadoPanel } from './legado-ui.js'
 import { AiModelBar } from './ai.js'
+import { SEARCH_MODES, collectName, isInShelf, paperToMarkdown, resolveSearchMode } from './cnki.js'
 
 /** 单次导入的界面提示上限：超过这个大小先提醒一句，但不阻止（宿主说了算）。 */
 const BIG_FILE_BYTES = 120 * 1024 * 1024
@@ -277,6 +279,7 @@ function coverVersionOf(book) {
 function BookCard(props) {
   const book = props.book
   const percent = typeof book.percent === 'number' ? book.percent : 0
+  const notesCount = typeof book.notesCount === 'number' && book.notesCount > 0 ? book.notesCount : 0
   const title = book.title || '未命名'
   // 带版本号的封面地址：换完封面的那一刻版本号变了，地址就变了，
   // 不会被浏览器按老缓存顶回旧图（coverVersion 由宿主维护，换/删一次 +1）。
@@ -326,7 +329,12 @@ function BookCard(props) {
         style: { width: `${Math.round(Math.max(0, Math.min(1, percent)) * 100)}%` },
       }),
     ),
-    h('div', { className: 'dr-book-meta' }, percent > 0 ? percentText(percent) : '还没开始读'),
+    // 有笔记时右边要让出一条给角标，否则「还没开始读」会和角标叠在一起。
+    h(
+      'div',
+      { className: notesCount > 0 ? 'dr-book-meta dr-book-meta-notes' : 'dr-book-meta' },
+      percent > 0 ? percentText(percent) : '还没开始读',
+    ),
   )
 }
 
@@ -337,6 +345,110 @@ function BookCard(props) {
  * updatedAt，而这个字段是封面地址的版本号。封面必须紧跟最后一次写盘，
  * 否则书架重新取列表时拿到的还是旧版本号，图和文字会各说各话。
  */
+/**
+ * 导入之后问一句：「这本像论文，按论文排还是按书排？」
+ *
+ * 宿主不替用户决定（`meta.pdfPaperHint` 只是线索），所以这里必须让人自己点。
+ * 弹窗结构沿用书源面板那套：遮罩层负责居中，卡片自己不带定位——上次把卡片
+ * 直接渲染成 `.dr-modal`，它没有定位，就飞到左下角去了。
+ */
+function LayoutPrompt(props) {
+  const hint = props.hint || {}
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const choose = useCallback(
+    async (layout) => {
+      setSaving(true)
+      setError('')
+      try {
+        await setBookLayout(props.bookHash, layout)
+        if (typeof props.onChosen === 'function') props.onChosen(layout)
+      } catch (err) {
+        setError(humanizeError(err))
+        setSaving(false)
+      }
+    },
+    [props],
+  )
+
+  // 必须留一条退路：两种版式都排不出来时（文件被移走、meta 坏了），
+  // 用户不能被困在这个遮罩后面。遮罩点击、Esc、「先不选」都通到同一个出口。
+  const dismiss = useCallback(() => {
+    if (saving) return
+    if (typeof props.onCancel === 'function') props.onCancel()
+  }, [props, saving])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+    const onKey = (event) => {
+      if (event && event.key === 'Escape') dismiss()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [dismiss])
+
+  return h(
+    'div',
+    { className: 'dr-modal-mask', role: 'presentation', onClick: dismiss },
+    h(
+      'div',
+      {
+        className: 'dr-modal dr-paper-ask',
+        role: 'dialog',
+        'aria-modal': 'true',
+        'aria-label': '选择排版方式',
+        onClick: (event) => event.stopPropagation(),
+      },
+      h('h2', { className: 'dr-modal-title' }, '这本看起来是论文'),
+      h(
+        'p',
+        { className: 'dr-modal-hint' },
+        `开头几行里认到了「${hint.reason || '摘要或关键词'}」。按哪种排？选错了以后还能在「✎ 编辑」里改。`,
+      ),
+      hint.title
+        ? h('p', { className: 'dr-paper-ask-title' }, hint.title)
+        : null,
+      error ? h('p', { className: 'dr-form-error', role: 'alert' }, error) : null,
+      h(
+        'div',
+        { className: 'dr-modal-actions' },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-btn dr-btn-primary',
+            disabled: saving,
+            onClick: () => choose('paper'),
+          },
+          '按论文排版',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-btn',
+            disabled: saving,
+            onClick: () => choose('book'),
+          },
+          '按普通书排版',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-btn dr-btn-ghost',
+            title: '先不选，保持现在的样子',
+            disabled: saving,
+            onClick: dismiss,
+          },
+          '先不选',
+        ),
+      ),
+    ),
+  )
+}
+
 function BookEditDialog(props) {
   const book = props.book
   const [title, setTitle] = useState(typeof book.title === 'string' ? book.title : '')
@@ -347,6 +459,9 @@ function BookEditDialog(props) {
   const [series, setSeries] = useState(typeof book.series === 'string' ? book.series : '')
   const [tagText, setTagText] = useState(Array.isArray(book.tags) ? book.tags.join('、') : '')
   const [favorite, setFavorite] = useState(book.favorite === true)
+  // 版式（0.9.8）：只有 PDF 需要问，其它书没有这个概念。
+  const isPdf = book.sourceFormat === 'pdf'
+  const [layout, setLayout] = useState(book.pdfLayout === 'paper' ? 'paper' : 'book')
   const [coverDataUrl, setCoverDataUrl] = useState('')
   const [coverCleared, setCoverCleared] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -437,6 +552,11 @@ function BookEditDialog(props) {
         tags,
         favorite,
       })
+      if (isPdf && layout !== (book.pdfLayout === 'paper' ? 'paper' : 'book')) {
+        // 换版式是重排整本书，放在字段保存之后：书名这些先落地，
+        // 万一重排失败，至少改好的书名没丢。
+        await setBookLayout(book.bookHash, layout)
+      }
       const saved = result && typeof result === 'object'
         && result.book && typeof result.book === 'object' ? result.book : null
       if (typeof props.onSaved === 'function') props.onSaved(saved)
@@ -488,6 +608,29 @@ function BookEditDialog(props) {
       h(
         'div',
         { className: 'dr-modal-body' },
+        isPdf
+          ? h(
+            'div',
+            { className: 'dr-field' },
+            h('div', { className: 'dr-field-label' }, '排版方式'),
+            h(
+              'select',
+              {
+                className: 'dr-input dr-select',
+                value: layout,
+                disabled: saving,
+                onChange: (event) => setLayout(event.target.value === 'paper' ? 'paper' : 'book'),
+              },
+              h('option', { value: 'book' }, '普通书（按页/按标题分章）'),
+              h('option', { value: 'paper' }, '论文（标题、摘要、关键词、参考文献）'),
+            ),
+            h(
+              'div',
+              { className: 'dr-field-value' },
+              '换版式会重新分章，阅读进度回到开头；批注可能对不上位置。',
+            ),
+          )
+          : null,
         h(
           'div',
           { className: 'dr-field' },
@@ -647,6 +790,19 @@ function BookEditDialog(props) {
       h(
         'div',
         { className: 'dr-modal-foot' },
+        typeof props.onDistill === 'function'
+          ? h(
+            'button',
+            {
+              type: 'button',
+              className: 'dr-btn dr-btn-ghost',
+              title: '把这本书按章蒸成能带走的笔记',
+              disabled: saving,
+              onClick: () => props.onDistill(book.bookHash),
+            },
+            '读书蒸馏',
+          )
+          : null,
         h(
           'button',
           {
@@ -690,7 +846,8 @@ function BookEditDialog(props) {
  * 三条路并列摆出来，而不是藏在二级菜单里：
  *   ① 本地文件 —— 原来就有的行为；
  *   ② 粘贴链接 —— 从任何地方复制来的书籍直链，粘进来就下载入架；
- *   ③ 找书     —— 用户自己填一个「搜索地址模板」，插件去抓结果页列出候选。
+ *   ③ 找书     —— 用户自己填一个「搜索地址模板」，插件去抓结果页列出候选；
+ *   ④ 知网检索 —— 直接搜知网，勾几条存成一本文献集（0.12.0）。
  *
  * 为什么不内置书源：插件不该替用户决定去哪个站点找书。这里只提供机制，
  * 地址由用户自己填；模板里 `{query}` 会被换成关键词。
@@ -717,6 +874,21 @@ function ImportDialog(props) {
   const [formError, setFormError] = useState('')
   const [savingSource, setSavingSource] = useState(false)
 
+  // ④ 知网检索（0.12.0）
+  const [paperQuery, setPaperQuery] = useState('')
+  const [paperField, setPaperField] = useState('title')
+  const [paperOrder, setPaperOrder] = useState(4)
+  const [paperYear, setPaperYear] = useState('')
+  const [paperBusy, setPaperBusy] = useState(false)
+  const [paperError, setPaperError] = useState('')
+  const [paperInfo, setPaperInfo] = useState('')
+  const [paperCopiedAt, setPaperCopiedAt] = useState(-1) // 刚复制完的那一条（下标），2 秒后回 -1
+  const [papers, setPapers] = useState(null) // null = 还没搜过
+  const [paperPicked, setPaperPicked] = useState([]) // 勾选的下标数组
+  const [paperCollecting, setPaperCollecting] = useState(false)
+  const [paperCollectInfo, setPaperCollectInfo] = useState('')
+  const [shelfTitles, setShelfTitles] = useState([]) // 书架里已有的 {title, author}
+
   useEffect(() => {
     let alive = true
     call('settings.get')
@@ -736,6 +908,35 @@ function ImportDialog(props) {
       alive = false
     }
   }, [])
+
+  // 书架里已有的书名：只用来给检索结果显示「已在本地」角标。
+  // 读不到就当没有——这一步失败绝不能让整个面板打不开。
+  useEffect(() => {
+    let alive = true
+    call('shelf.list')
+      .then((value) => {
+        if (!alive) return
+        const list = value && Array.isArray(value.books) ? value.books : []
+        setShelfTitles(list.map((book) => ({ title: book && book.title, author: book && book.author })))
+      })
+      .catch(() => {
+        if (!alive) return
+        setShelfTitles([])
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // 「已复制」这类一句话提示，两秒后自己走：不该占着屏幕等用户点掉。
+  useEffect(() => {
+    if (paperInfo === '' && paperCopiedAt < 0) return undefined
+    const timer = setTimeout(() => {
+      setPaperInfo('')
+      setPaperCopiedAt(-1)
+    }, 2000)
+    return () => clearTimeout(timer)
+  }, [paperInfo, paperCopiedAt])
 
   const busy = urlBusy || downloading !== '' || savingSource
   const close = () => {
@@ -832,6 +1033,218 @@ function ImportDialog(props) {
       setSavingSource(false)
     }
   }
+
+  /** 「复制题录」：剪贴板优先，失败就说清楚，不假装成功。 */
+  const copyPaper = async (item, index) => {
+    const markdown = paperToMarkdown(item)
+    let copied = false
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(markdown)
+        copied = true
+      }
+    } catch (error) {
+      copied = false
+    }
+    // 「已复制」显示在**被点的那一个按钮**上：整段只弹一句提示时，用户看不出
+    // 到底复制了哪一条，勾错行会把别人的题录贴进文档。
+    setPaperCopiedAt(copied ? index : -1)
+    setPaperInfo(copied ? '' : '这个环境不让自动复制，请手动选中题录')
+  }
+
+  const runPaperSearch = async () => {
+    const value = paperQuery.trim()
+    if (value === '') {
+      setPaperError('先输入要搜的主题词。')
+      return
+    }
+    setPaperBusy(true)
+    setPaperError('')
+    setPaperInfo('')
+    setPaperCollectInfo('')
+    setPaperPicked([])
+    try {
+      const result = await call('paper.search', {
+        query: value,
+        field: paperField,
+        order: paperOrder,
+        year: paperYear.trim(),
+      })
+      const list = result && Array.isArray(result.items) ? result.items : []
+      setPapers(list)
+    } catch (error) {
+      setPapers(null)
+      setPaperError(humanizeError(error))
+    } finally {
+      setPaperBusy(false)
+    }
+  }
+
+  const togglePicked = (index) => {
+    setPaperPicked((prev) => (prev.includes(index)
+      ? prev.filter((value) => value !== index)
+      : [...prev, index].sort((a, b) => a - b)))
+  }
+
+  const collectPapers = async () => {
+    if (paperCollecting || paperPicked.length === 0 || !Array.isArray(papers)) return
+    const items = paperPicked.map((index) => papers[index]).filter((item) => item !== undefined)
+    if (items.length === 0) return
+    const title = collectName(items.length)
+    setPaperCollecting(true)
+    setPaperError('')
+    setPaperCollectInfo('')
+    try {
+      await call('paper.collect', { title, items })
+      setPaperCollectInfo(`已存成《${title}》，去书架看看`)
+      setPaperPicked([])
+      setPapers(null)
+      // 通知书架刷新：新书要立刻出现，不能等用户手动点刷新。
+      if (typeof props.onCollected === 'function') props.onCollected()
+    } catch (error) {
+      // 失败不清勾选：用户重试一次就好，不该让他重新一条条勾。
+      setPaperError(humanizeError(error))
+    } finally {
+      setPaperCollecting(false)
+    }
+  }
+
+  const paperTypeText = (type) => {
+    const value = typeof type === 'string' ? type.trim() : ''
+    if (value === '硕士论文' || value === '博士论文' || value === '中国会议' || value === '期刊') return value
+    return value === '' ? '期刊' : value
+  }
+
+  const paperResults = Array.isArray(papers)
+    ? h(
+      'div',
+      null,
+      papers.length === 0
+        ? h('div', { className: 'dr-import-hint' }, '知网没搜到相关的文献，换个词试试。')
+        : h(
+          'div',
+          { className: 'dr-candidates' },
+          papers.map((item, index) => h(
+            'div',
+            { key: `${index}-${item && item.title ? item.title : ''}`, className: 'dr-candidate', style: { flexDirection: 'column', alignItems: 'stretch', gap: '4px' } },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+              h(
+                'span',
+                {
+                  className: 'dr-paper-type',
+                  style: {
+                    flex: 'none',
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    fontSize: '11px',
+                    background: 'var(--dsw-alias-bg-layer-1, #fafafa)',
+                    color: 'var(--dsw-alias-label-secondary, #5c6066)',
+                  },
+                },
+                paperTypeText(item && item.type),
+              ),
+              h('div', { className: 'dr-candidate-title', title: item && item.title ? item.title : '' }, (item && item.title) || '未命名文献'),
+              isInShelf(item, shelfTitles)
+                ? h(
+                  'span',
+                  {
+                    className: 'dr-paper-local',
+                    style: {
+                      flex: 'none',
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontSize: '11px',
+                      background: 'var(--dsw-alias-bg-layer-1, #fafafa)',
+                      color: 'var(--dsw-alias-label-tertiary, #8a8f98)',
+                    },
+                  },
+                  '已在本地',
+                )
+                : null,
+            ),
+            h(
+              'div',
+              { className: 'dr-import-hint' },
+              [
+                Array.isArray(item && item.authors) ? item.authors.filter((name) => typeof name === 'string' && name !== '').join('、') : '',
+                [item && item.journal, item && item.issue].filter((value) => typeof value === 'string' && value !== '').join(' '),
+              ].filter((value) => value !== '').join(' · ') || '题录信息不全',
+            ),
+            h(
+              'div',
+              { className: 'dr-import-hint' },
+              `被引 ${Number(item && item.citations) || 0} · 下载 ${Number(item && item.downloads) || 0}`,
+            ),
+            item && typeof item.snippet === 'string' && item.snippet !== ''
+              ? h(
+                'div',
+                {
+                  className: 'dr-import-hint',
+                  style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                },
+                item.snippet,
+              )
+              : null,
+            h(
+              'div',
+              { className: 'dr-import-row' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn',
+                  disabled: !(item && typeof item.url === 'string' && item.url !== ''),
+                  onClick: () => {
+                    if (item && item.url) window.open(item.url, '_blank', 'noopener')
+                  },
+                },
+                '打开知网页',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn',
+                  'aria-label': paperCopiedAt === index ? '已复制这条题录' : '复制这条题录',
+                  onClick: () => copyPaper(item, index),
+                },
+                paperCopiedAt === index ? '已复制' : '复制题录',
+              ),
+              h(
+                'label',
+                { className: 'dr-import-hint', style: { display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' } },
+                h('input', {
+                  type: 'checkbox',
+                  checked: paperPicked.includes(index),
+                  'aria-label': `选中《${(item && item.title) || '这条文献'}》`,
+                  onChange: () => togglePicked(index),
+                }),
+                '选这篇',
+              ),
+            ),
+          )),
+        ),
+      papers.length > 0
+        ? h(
+          'div',
+          { className: 'dr-import-row' },
+          h('div', { className: 'dr-import-hint' }, `已选 ${paperPicked.length} 篇`),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dr-btn dr-btn-primary',
+              disabled: paperPicked.length === 0 || paperCollecting,
+              onClick: collectPapers,
+            },
+            paperCollecting ? '正在存…' : '存成文献集',
+          ),
+        )
+        : null,
+    )
+    : null
 
   const fileInput = h('input', {
     ref: fileRef,
@@ -1025,6 +1438,67 @@ function ImportDialog(props) {
               '添加/修改书源',
             ),
         ),
+        // ④ 知网检索
+        h(
+          'div',
+          { className: 'dr-import-section' },
+          h('div', { className: 'dr-import-title' }, '④ 知网检索'),
+          h('div', { className: 'dr-import-hint' }, '直接搜知网上的文献，勾几条存成一本文献集，放进书架慢慢看。'),
+          h(
+            'div',
+            { className: 'dr-import-row' },
+            h(
+              'select',
+              {
+                className: 'dr-input dr-select',
+                value: `${paperField}-${paperOrder}`,
+                'aria-label': '怎么找',
+                onChange: (event) => {
+                  const mode = resolveSearchMode(event.target.value)
+                  setPaperField(mode.field)
+                  setPaperOrder(mode.order)
+                },
+              },
+              SEARCH_MODES.map((mode) => h('option', { key: mode.value, value: mode.value }, mode.label)),
+            ),
+            h('input', {
+              type: 'text',
+              className: 'dr-input',
+              value: paperYear,
+              placeholder: '年份（可留空）',
+              maxLength: 4,
+              'aria-label': '年份',
+              onChange: (event) => setPaperYear(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') runPaperSearch()
+              },
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dr-import-row' },
+            h('input', {
+              type: 'text',
+              className: 'dr-input',
+              value: paperQuery,
+              placeholder: '论文题目、主题词或关键词',
+              'aria-label': '论文搜索词',
+              onChange: (event) => setPaperQuery(event.target.value),
+              onKeyDown: (event) => {
+                if (event.key === 'Enter') runPaperSearch()
+              },
+            }),
+            h(
+              'button',
+              { type: 'button', className: 'dr-btn dr-btn-primary', disabled: paperBusy, onClick: runPaperSearch },
+              paperBusy ? '正在搜…' : '搜索',
+            ),
+          ),
+          paperError !== '' ? h('div', { className: 'dr-import-error' }, paperError) : null,
+          paperInfo !== '' ? h('div', { className: 'dr-import-hint' }, paperInfo) : null,
+          paperCollectInfo !== '' ? h('div', { className: 'dr-import-hint' }, paperCollectInfo) : null,
+          paperResults,
+        ),
       ),
     ),
   )
@@ -1073,6 +1547,7 @@ export function ShelfView(props) {
   const [importing, setImporting] = useState(false)
   const [importError, setImportError] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [paperAsk, setPaperAsk] = useState(null) // 导入后问「论文还是书」；null = 不问
   const [editing, setEditing] = useState(null) // 正在编辑的书；null = 弹窗关着
   const [importOpen, setImportOpen] = useState(false) // 「导入」面板（0.5.1）
   const [legadoOpen, setLegadoOpen] = useState(false) // 书源面板：搜书、加书（0.9.0）
@@ -1148,7 +1623,14 @@ export function ShelfView(props) {
         const result = await call('shelf.import', { filename: file.name, dataBase64 })
         const bookHash = result && result.bookHash
         if (typeof bookHash === 'string' && bookHash !== '') {
-          if (typeof props.onImported === 'function') {
+          const hint = result?.meta?.pdfPaperHint
+          // 用户已经自己选过版式（pdfLayoutByUser）就别再问第二遍：重复导入同一本
+          // 文件时，meta 里的线索仍然为真，再弹一次会像坏掉了。
+          if (hint && hint.looksLikePaper === true && result?.meta?.pdfLayoutByUser !== true) {
+            // 像论文就先问一句，别自己替他决定排版。
+            setImportOpen(false)
+            setPaperAsk({ bookHash, hint })
+          } else if (typeof props.onImported === 'function') {
             props.onImported(bookHash)
           } else {
             reload()
@@ -1176,7 +1658,14 @@ export function ShelfView(props) {
         const bookHash = result && result.bookHash
         setImportOpen(false)
         setNotice('已加入书架')
-        if (typeof bookHash === 'string' && bookHash !== '' && typeof props.onImported === 'function') {
+        const hint = result?.meta?.pdfPaperHint
+        if (
+          hint && hint.looksLikePaper === true
+          && result?.meta?.pdfLayoutByUser !== true
+          && typeof bookHash === 'string' && bookHash !== ''
+        ) {
+          setPaperAsk({ bookHash, hint })
+        } else if (typeof bookHash === 'string' && bookHash !== '' && typeof props.onImported === 'function') {
           props.onImported(bookHash)
         } else {
           reload()
@@ -1378,6 +1867,23 @@ export function ShelfView(props) {
           },
         },
         h(BookCard, { book, onOpen: props.onOpen }),
+        // 可见的「书籍信息」入口：右键是老用户的习惯，但触屏上根本没有右键，
+        // 「读书蒸馏」也只挂在这个弹窗里。常显一个小按钮，别再藏。
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-iconbtn dr-cell-tools',
+            title: '书籍信息与工具（改名、封面、版式、读书蒸馏）',
+            'aria-label': `打开《${book.title || '未命名'}》的信息与工具`,
+            style: { position: 'absolute', top: 14, right: 52 },
+            onClick: (event) => {
+              event.stopPropagation()
+              onEdit(book)
+            },
+          },
+          '⋯',
+        ),
         h(
           'button',
           {
@@ -1393,6 +1899,25 @@ export function ShelfView(props) {
           },
           '×',
         ),
+        // 「笔记 N」角标：这本书已经写进 Obsidian 的读书笔记有几段。
+        // 它是格子里的兄弟按钮而不是卡片里的子节点 —— 卡片本身是个 <button>，
+        // 里面再套按钮就是非法嵌套，点起来也会连带触发打开书。
+        typeof props.onNotes === 'function' && typeof book.notesCount === 'number' && book.notesCount > 0
+          ? h(
+            'button',
+            {
+              type: 'button',
+              className: 'dr-notes-chip',
+              title: `已写进 Obsidian 读书笔记 ${book.notesCount} 段，点开查看`,
+              'aria-label': `查看《${book.title || '未命名'}》的读书笔记，${book.notesCount} 段`,
+              onClick: (event) => {
+                event.stopPropagation()
+                props.onNotes(book.bookHash)
+              },
+            },
+            `笔记 ${book.notesCount > 99 ? '99+' : book.notesCount}`,
+          )
+          : null,
       )),
     )
   }
@@ -1417,6 +1942,31 @@ export function ShelfView(props) {
           onPickFile(event)
         },
         onImportUrl,
+        // 知网文献集存好之后：面板不关，但书架立刻刷新，新书马上出现。
+        onCollected: () => {
+          reload()
+          setNotice('已存成文献集')
+        },
+      })
+      : null,
+    paperAsk
+      ? h(LayoutPrompt, {
+        bookHash: paperAsk.bookHash,
+        hint: paperAsk.hint,
+        onChosen: (layout) => {
+          const target = paperAsk.bookHash
+          setPaperAsk(null)
+          setNotice(layout === 'paper' ? '已按论文排版' : '已按普通书排版')
+          if (typeof props.onImported === 'function') props.onImported(target)
+          else reload()
+        },
+        // 「先不选」：关掉询问，按现状打开这本书，不重排、不动进度。
+        onCancel: () => {
+          const target = paperAsk.bookHash
+          setPaperAsk(null)
+          if (typeof props.onImported === 'function') props.onImported(target)
+          else reload()
+        },
       })
       : null,
     editing
@@ -1424,6 +1974,12 @@ export function ShelfView(props) {
         book: editing,
         onCancel: onEditCancel,
         onSaved: onEditSaved,
+        // 读书蒸馏现在从书架走：先关掉信息弹窗，再交给上层打开这本书的蒸馏面板。
+        // 弹窗不关就切屏，回来时会看见一个半透明的残留框。
+        onDistill: (hash) => {
+          onEditCancel()
+          if (typeof props.onDistill === 'function') props.onDistill(hash)
+        },
       })
       : null,
     h(LegadoPanel, {

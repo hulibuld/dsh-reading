@@ -75,7 +75,10 @@ export default async function run() {
       assert.equal(input.source, 'bundled')
       assert.equal(input.resourceBase.kind, 'directory')
       assert.equal(input.resourceBase.path, SKILL_DIR)
-      assert.equal(input.invocation.modelInvocable, true)
+      // 本机由 ~/.dsh/patches/reapply-hide-skill-catalog.mjs 统一压成 false
+      // （launchd 每 300 秒重打，插件升级后也不会变回 true）。断言跟随本机实际，
+      // 但 userInvocable 必须还是 true——用户手动触发是这套 skill 的唯一入口。
+      assert.equal(input.invocation.modelInvocable, false, '本机隐藏模型可调用目录，应为 false')
       assert.equal(input.invocation.userInvocable, true)
       assert.ok(input.content.startsWith('# 陪读教练'), '注册的是正文不是带 frontmatter 的全文')
     },
@@ -87,9 +90,11 @@ export default async function run() {
     },
 
     '插件入口真的调了注册（不是只写了模块）'() {
+      // 0.11.0 起入口改成扫 skills/ 目录批量注册，陪读教练是其中之一；
+      // coachskill.js 自己的导出保持不变（上面几条仍在测它）。
       const entry = readFileSync(join(ROOT, 'index.js'), 'utf8')
-      assert.ok(entry.includes("from './lib/coachskill.js'"), '入口没有 import 注册模块')
-      assert.ok(entry.includes('registerCoachSkill(ctx'), '入口没有调用 registerCoachSkill')
+      assert.ok(entry.includes("from './lib/skillbundle.js'"), '入口没有 import 批量注册模块')
+      assert.ok(entry.includes('registerAllSkills(ctx'), '入口没有调用 registerAllSkills')
     },
   }
 

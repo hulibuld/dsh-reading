@@ -393,6 +393,7 @@ const BRANCHES = {
       contextCfiRange: P.cfiFull,
       cutoffCfi: P.cfiFull,
       model: { type: 'string' },
+      mode: { type: 'string', maxLength: 32 },
       threadId: P.ulid,
       parentId: P.ulid,
       createdAt: P.iso8601,
@@ -750,7 +751,7 @@ export function makeQa(fields) {
     answer,
     cutoffCfi,
   }
-  for (const key of ['anchorAnnotationId', 'contextExcerpt', 'contextCfiRange', 'model', 'threadId', 'parentId']) {
+  for (const key of ['anchorAnnotationId', 'contextExcerpt', 'contextCfiRange', 'model', 'mode', 'threadId', 'parentId']) {
     if (fields[key] !== undefined) record[key] = fields[key]
   }
   if (fields.deleted !== undefined) record.deleted = fields.deleted

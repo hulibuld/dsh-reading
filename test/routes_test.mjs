@@ -722,6 +722,61 @@ export default async function run() {
       )
     }
 
+    // ── 9d. 问 AI 的模式（0.11.0）：ask.presets 下发名单，qa.ask 把 mode 透传下去 ──
+    {
+      const presetsRes = await call(handler, post(`${API_PREFIX}/ask.presets`, {}))
+      assert.equal(presetsRes.statusCode, 200, presetsRes.text())
+      const presets = presetsRes.json().value
+      assert.ok(Array.isArray(presets), 'ask.presets 要给数组')
+      assert.deepEqual(
+        presets.map((item) => item.id),
+        ['general', 'classic', 'paper', 'concept', 'foreign'],
+        '五个模式的顺序就是下拉框的顺序',
+      )
+      for (const preset of presets) {
+        assert.equal(typeof preset.name, 'string')
+        assert.equal(typeof preset.description, 'string')
+        assert.equal(typeof preset.maxChars, 'number')
+        // persona 是给模型的系统提示，不该流到界面数据里
+        assert.equal('persona' in preset, false, `ask.presets 不能泄露 persona：${preset.id}`)
+      }
+
+      // 一台「能问 AI」的宿主：桩掉 ask，只验路由这一层的透传
+      const seen = []
+      const askHandler = createHandler({
+        store,
+        logger: { warn: () => {} },
+        ask: {
+          ask: async (input) => {
+            seen.push(input)
+            return { id: 'qa-stub', answer: '桩回答', mode: input.mode }
+          },
+        },
+      })
+
+      const asked = await call(
+        askHandler,
+        post(`${API_PREFIX}/qa.ask`, {
+          bookHash: dirName,
+          question: '这段什么意思？',
+          selectedText: '圈住的原文',
+          mode: 'paper',
+        }),
+      )
+      assert.equal(asked.statusCode, 200, asked.text())
+      assert.equal(seen.length, 1, 'qa.ask 必须把请求交给 ask 服务')
+      assert.equal(seen[0].mode, 'paper', 'mode 要原样透传到 ask.ask')
+      assert.equal(seen[0].question, '这段什么意思？')
+
+      // 不带 mode：透传空串（不是 undefined，ask 那边按 general 处理）
+      await call(askHandler, post(`${API_PREFIX}/qa.ask`, { bookHash: dirName, question: '还是问', selectedText: '原文' }))
+      assert.equal(seen[1].mode, '', '没传 mode 时给空串')
+
+      // 非字符串的 mode（手改出来的请求）一律当没传，不能让后端拿到一个对象
+      await call(askHandler, post(`${API_PREFIX}/qa.ask`, { bookHash: dirName, question: '又问', selectedText: '原文', mode: 42 }))
+      assert.equal(seen[2].mode, '', '非字符串 mode 必须收敛成空串')
+    }
+
     // ── 10. 方法 / 路径错误 ──
     {
       const unknown = await call(handler, post(`${API_PREFIX}/nope.method`, {}))
@@ -874,6 +929,130 @@ export default async function run() {
       assert.equal(String(icon.headers['content-type']), 'image/svg+xml')
       assert.ok(icon.body.length > 100, '图标不该是空文件')
       assert.match(String(icon.body.slice(0, 64)), /<svg/)
+    }
+
+    // ── 13.6 知网检索：参数归一、错误码、空结果不当失败 ──
+    {
+      const seen = []
+      const stubItems = [
+        {
+          title: '20世纪以来中国的大型滑坡及其发生机制',
+          authors: ['黄润秋'],
+          journal: '岩石力学与工程学报',
+          issue: '2007年03期',
+          type: '期刊',
+          keywords: ['边坡工程', '大型滑坡'],
+          snippet: '在收集大量资料的基础上……',
+          url: 'https://www.cnki.com.cn/Article/CJFDTOTAL-YSLX200703000.htm',
+          citations: 3019,
+          downloads: 27027,
+        },
+      ]
+      const paperHandler = createHandler({
+        store,
+        logger: { warn: () => {} },
+        paperSearch: async (params) => {
+          seen.push(params)
+          return { items: stubItems, empty: false, page: params.page, hasMore: true, source: 'cnki' }
+        },
+      })
+
+      // 正常检索：参数被归一（order 越界回落 4、year 非四位丢掉、field 只认两个值）
+      const ok = await call(
+        paperHandler,
+        post(`${API_PREFIX}/paper.search`, { query: ' 滑坡 ', field: 'content', order: 9, year: '24', page: 2 }),
+      )
+      assert.equal(ok.statusCode, 200)
+      const payload = ok.json().value
+      assert.equal(payload.page, 2)
+      assert.equal(payload.query, '滑坡', '关键词要 trim')
+      assert.equal(payload.empty, false)
+      assert.equal(payload.items.length, 1)
+      assert.equal(payload.items[0].title, stubItems[0].title, '题录原样透传，不在路由层加工')
+      assert.equal(seen.length, 1)
+      assert.deepEqual(seen[0], { query: '滑坡', field: 'content', order: 4, year: '', page: 2 })
+
+      // 页码超过知网上限：夹到 20，不报错（用户点「第 21 页」不该看到红字）
+      const capped = await call(paperHandler, post(`${API_PREFIX}/paper.search`, { query: '滑坡', page: 999 }))
+      assert.equal(capped.statusCode, 200)
+      assert.equal(capped.json().value.page, 20, `页码应夹到 20，实际 ${capped.json().value.page}`)
+      assert.equal(seen[1].page, 20)
+      assert.equal(seen[1].field, 'title', 'field 缺省就是按题名搜')
+
+      // 空关键词：400 + E_PAPER_QUERY，且绝不发请求
+      const before = seen.length
+      const blank = await call(paperHandler, post(`${API_PREFIX}/paper.search`, { query: '   ' }))
+      assertErrorEnvelope(blank, 400, 'E_PAPER_QUERY')
+      assert.equal(seen.length, before, '空关键词不该真的去检索')
+
+      // 网络层抛普通 Error → 折成 E_PAPER_FETCH，且不回显原始堆栈
+      const brokenHandler = createHandler({
+        store,
+        logger: { warn: () => {} },
+        paperSearch: async () => {
+          throw new Error('connect ETIMEDOUT 203.0.113.9:443 at /Users/someone/lib/cnki.js')
+        },
+      })
+      const broken = await call(brokenHandler, post(`${API_PREFIX}/paper.search`, { query: '滑坡' }))
+      assertErrorEnvelope(broken, 400, 'E_PAPER_FETCH')
+
+      // 检索成功但没有命中：200 + empty:true（空结果是正常结果，不是错误）
+      const emptyHandler = createHandler({
+        store,
+        logger: { warn: () => {} },
+        paperSearch: async (params) => ({ items: [], empty: true, page: params.page }),
+      })
+      const empty = await call(emptyHandler, post(`${API_PREFIX}/paper.search`, { query: '不存在的词' }))
+      assert.equal(empty.statusCode, 200)
+      assert.equal(empty.json().value.empty, true)
+      assert.deepEqual(empty.json().value.items, [])
+    }
+
+    // ── 13.7 文献集造书：真入库，且书要能在书架里查到 ──
+    {
+      const items = [
+        {
+          title: '滑坡成因机制研究',
+          authors: ['张三', '李四'],
+          journal: '工程地质学报',
+          issue: '2021年03期',
+          type: '期刊',
+          keywords: ['滑坡', '成因'],
+          snippet: '本文讨论了……',
+          url: 'https://www.cnki.com.cn/Article/CJFDTOTAL-GCDZ202103001.htm',
+          citations: 12,
+          downloads: 340,
+        },
+        { title: '某滑坡体稳定性分析', type: '硕士论文', issue: '2026-06-13', authors: [] },
+      ]
+      const res = await call(handler, post(`${API_PREFIX}/paper.collect`, { title: '滑坡文献集', items }))
+      assert.equal(res.statusCode, 200, res.text())
+      const payload = res.json().value
+      assert.equal(payload.title, '滑坡文献集')
+      assert.match(payload.bookHash, /^[0-9a-f]{64}$/, '必须返回真正的书哈希')
+
+      // 书不能只存在响应里——书架必须查得到，否则用户点完「存成文献集」什么也没有
+      const shelf = await call(handler, post(`${API_PREFIX}/shelf.list`, {}))
+      assert.equal(shelf.statusCode, 200)
+      const found = shelf.json().value.books.find((book) => book.bookHash === payload.bookHash)
+      assert.ok(found, '造好的文献集必须出现在书架里')
+      assert.equal(found.title, '滑坡文献集')
+      assert.equal(found.sourceFormat, 'epub', '文献集就是一本普通 EPUB，走同一套阅读链路')
+
+      // 不给书名：用默认名，仍然是一本能读的书
+      const unnamed = await call(handler, post(`${API_PREFIX}/paper.collect`, { items }))
+      assert.equal(unnamed.statusCode, 200)
+      assert.match(unnamed.json().value.title, /^文献集 \d{4}-\d{2}-\d{2}$/, `默认书名应带日期，实际 ${unnamed.json().value.title}`)
+
+      // 一条都没勾：400 + E_PAPER_COLLECT
+      assertErrorEnvelope(await call(handler, post(`${API_PREFIX}/paper.collect`, { items: [] })), 400, 'E_PAPER_COLLECT')
+      assertErrorEnvelope(await call(handler, post(`${API_PREFIX}/paper.collect`, {})), 400, 'E_PAPER_COLLECT')
+      // 全是空题名：等同于没勾
+      assertErrorEnvelope(
+        await call(handler, post(`${API_PREFIX}/paper.collect`, { items: [{ title: '  ' }, {}] })),
+        400,
+        'E_PAPER_COLLECT',
+      )
     }
 
     // ── 14. 错误包装：注入一个必然抛的 store 方法，必须落到 500 且不回显 ──

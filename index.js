@@ -25,7 +25,7 @@ import { createAskService } from './lib/ask.js'
 import { createAiCallLog, withAiLog } from './lib/aicall.js'
 import { describeAiStatus } from './lib/aistatus.js'
 import { DEFAULT_LIBRARY_DIR } from './lib/paths.js'
-import { registerCoachSkill } from './lib/coachskill.js'
+import { registerAllSkills } from './lib/skillbundle.js'
 
 /** 插件名。与 package.json 的 `name` 一致，也是 cordis 里的行标识。 */
 export const name = 'dsh-reading'
@@ -86,8 +86,9 @@ export function apply(ctx, config) {
   const aiLog = createAiCallLog({ paths: store.paths, logger: console })
   const ask = withAiLog(askService, aiLog)
 
-  // 陪读教练：注册成一个 DSH skill。宿主没有 skills 服务时自动跳过，不影响阅读器。
-  registerCoachSkill(ctx, { logger: console })
+  // 随包分发的 skill（陪读教练、拆书、论文精读、文献综述、笔记成文）：
+  // 扫 skills/ 目录逐个注册，加 skill 只需要加目录。宿主没有 skills 服务时自动跳过。
+  registerAllSkills(ctx, { logger: console })
 
   ctx.effect(
     () =>

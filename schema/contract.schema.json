@@ -519,6 +519,11 @@
         "model": {
           "type": "string"
         },
+        "mode": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "0.11.0：这次提问用的问 AI 模式 id。老记录没有这个字段。"
+        },
         "threadId": {
           "$ref": "#/$defs/ulid"
         },

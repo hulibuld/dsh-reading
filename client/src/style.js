@@ -117,7 +117,7 @@ const CSS = `
   cursor: pointer;
   box-shadow:
     inset 0 1px 0 var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.9)),
-    0 1px 2px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.08));
+    0 1px 2px rgba(23, 26, 33, 0.08);
   transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.06s;
 }
 .dr-btn:hover {
@@ -125,11 +125,11 @@ const CSS = `
   border-color: var(--dsw-alias-border-l2, #c9ccd4);
   box-shadow:
     inset 0 1px 0 var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.9)),
-    0 2px 6px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.12));
+    0 2px 6px rgba(23, 26, 33, 0.12);
 }
 .dr-btn:active {
   transform: translateY(1px);
-  box-shadow: inset 0 2px 4px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.18));
+  box-shadow: inset 0 2px 4px rgba(23, 26, 33, 0.18);
 }
 .dr-btn:focus-visible {
   outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
@@ -149,13 +149,13 @@ const CSS = `
   color: #ffffff;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.28),
-    0 2px 6px var(--dsw-alias-shadow-brand, rgba(74, 125, 255, 0.32));
+    0 2px 6px rgba(74, 125, 255, 0.32);
 }
 .dr-btn-primary:hover {
   background: #2a60cd;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.3),
-    0 3px 10px var(--dsw-alias-shadow-brand, rgba(74, 125, 255, 0.4));
+    0 3px 10px rgba(74, 125, 255, 0.4);
 }
 .dr-btn-ghost {
   border-color: transparent;
@@ -857,7 +857,7 @@ const CSS = `
 .dr-ann-meta {
   margin-top: 3px;
   font-size: 11px;
-  color: var(--dsw-alias-label-quaternary, #a8adb5);
+  color: var(--dsw-alias-label-caption, #a8adb5);
 }
 
 /* ── 选区菜单（挂父窗口，避免被 iframe 裁切） ──────────────────── */
@@ -948,10 +948,45 @@ const CSS = `
 .dr-reader-bar .dr-btn-ghost { color: var(--dsh-reading-ink, #22262b); }
 .dr-reader-bar .dr-iconbtn { color: var(--dsh-reading-ink, #22262b); }
 .dr-reader-bar .dr-iconbtn:hover { background: rgba(128, 128, 128, 0.14); }
+.dr-cell-tools {
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0.72;
+}
+.dr-book-cell:hover .dr-cell-tools,
+.dr-cell-tools:focus-visible { opacity: 1; }
+@media (hover: none) {
+  .dr-cell-tools { opacity: 1; }
+}
+
 .dr-reader .dr-iconbtn-q {
   font-weight: 700;
   font-family: ui-serif, Georgia, serif;
 }
+/* 阅读器工具栏：按钮一律走纸面配色，不吃宿主主题。
+   用户报过「按钮底是黑的、图标也是黑的」——宿主用深色 DSH 主题时，
+   .dr-iconbtn 的背景取自 --dsh-reading-ui-bg（深色），而文字取自纸面的墨色，
+   两者撞在一起就看不见了。这里把前景背景都钉在纸面上。 */
+.dr-reader .dr-reader-bar .dr-btn,
+.dr-reader .dr-reader-bar .dr-iconbtn {
+  background: transparent;
+  background-image: none;
+  border-color: var(--dsh-reading-rule, #e6e2d8);
+  color: var(--dsh-reading-ink, #22262b);
+  box-shadow: none;
+}
+.dr-reader .dr-reader-bar .dr-btn:hover,
+.dr-reader .dr-reader-bar .dr-iconbtn:hover {
+  background: rgba(128, 128, 128, 0.14);
+  color: var(--dsh-reading-ink, #22262b);
+}
+.dr-reader .dr-reader-bar .dr-btn[aria-pressed='true'],
+.dr-reader .dr-reader-bar .dr-iconbtn[aria-pressed='true'] {
+  border-color: var(--dsh-reading-ink, #22262b);
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--dsh-reading-ink, #22262b);
+}
+
 .dr-viewport { background: var(--dsh-reading-paper, #fcfbf8); }
 .dr-frame { background: var(--dsh-reading-paper, #fcfbf8); }
 .dr-rail { color: var(--dsh-reading-ink, #22262b); }
@@ -1341,7 +1376,7 @@ const CSS = `
   line-height: 1.6;
   color: var(--dsw-alias-label-secondary, #6b7280);
   background: var(--dsw-alias-bg-layer-2, #f5f5f4);
-  border-left: 2px solid var(--dsw-alias-accent-primary, #4a7dff);
+  border-left: 2px solid var(--dsh-reading-ui-accent, #4a7dff);
   border-radius: var(--dsw-radius-xs, 4px);
   padding: 8px 10px;
   max-height: 4.9em;
@@ -1482,7 +1517,7 @@ const CSS = `
   gap: 7px;
   padding: 12px;
   border: 1px solid var(--dsw-alias-border-l1, #e3e5e8);
-  border-radius: var(--dsw-radius-m, 8px);
+  border-radius: var(--dsw-radius-md, 8px);
   background: var(--dsw-alias-bg-layer-1, #fafafa);
 }
 .dr-import-title {
@@ -1503,7 +1538,7 @@ const CSS = `
 }
 .dr-import-error {
   font-size: 11.5px;
-  color: var(--dsw-alias-label-error, #c4342b);
+  color: var(--dsw-alias-state-error-primary, #c4342b);
 }
 .dr-import-linkbtn {
   align-self: flex-start;
@@ -1521,7 +1556,7 @@ const CSS = `
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: var(--dsw-radius-s, 6px);
+  border-radius: var(--dsw-radius-sm, 6px);
   background: var(--dsw-alias-bg-layer-2, #f2f3f5);
 }
 .dr-candidate-title {
@@ -1615,9 +1650,12 @@ const CSS_TOKENS = `
   /* 深色主入口（书源）：同样是自持色，不吃主题 */
   --dsh-reading-ui-ink-fill: #333842;
   --dsh-reading-ui-ink-fill-hover: #23262d;
-  --dsh-reading-ui-accent-soft: var(--dsw-alias-bg-brand-soft, rgba(47, 107, 221, 0.12));
-  --dsh-reading-ui-danger: var(--dsw-alias-label-danger, #b4362b);
-  /* 圆角：全部回落到宿主 token，缺了就用自己的档 */
+  --dsh-reading-ui-accent-soft: rgba(47, 107, 221, 0.12);
+  --dsh-reading-ui-danger: var(--dsw-alias-state-error-primary, #b4362b);
+  /* 圆角：全部回落到宿主 token，缺了就用自己的档。
+     宿主没有「零圆角」这一档（radius-none 不存在），需要在两处把圆角压平
+     （行内命中词的 mark、手机端满屏书源弹窗），所以自己留一格 0。 */
+  --dsh-reading-ui-r-none: 0;
   --dsh-reading-ui-r-sm: var(--dsw-radius-sm, 6px);
   --dsh-reading-ui-r-md: var(--dsw-radius-md, 10px);
   --dsh-reading-ui-r-lg: var(--dsw-radius-lg, 14px);
@@ -2307,7 +2345,7 @@ const CSS_V060 = `
 .dr-search-hit-snippet mark {
   background: rgba(74, 125, 255, 0.18);
   color: inherit;
-  border-radius: var(--dsw-radius-none, 0);
+  border-radius: var(--dsh-reading-ui-r-none, 0);
   padding: 0 1px;
 }
 .dr-search-hit-pos {
@@ -2606,7 +2644,7 @@ export const CSS_AI = `
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--dsw-alias-label-quaternary, #8a8a8a);
+  background: var(--dsw-alias-label-caption, #8a8a8a);
   flex: none;
 }
 .dr-ai-entry { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
@@ -2694,7 +2732,7 @@ export const CSS_AI = `
 .dr-ai-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dr-ai-row-detail { grid-column: 2; color: var(--dsw-alias-label-secondary, #777); font-size: 11px; word-break: break-word; }
 .dr-ai-row.is-bad .dr-ai-row-detail { color: #c0392b; }
-.dr-ai-foot { font-size: 10.5px; color: var(--dsw-alias-label-quaternary, #8a8a8a); word-break: break-all; }
+.dr-ai-foot { font-size: 10.5px; color: var(--dsw-alias-label-caption, #8a8a8a); word-break: break-all; }
 `
 
 /** 读书蒸馏面板样式（0.8.0）。 */
@@ -2708,7 +2746,7 @@ export const CSS_DISTILL = `
 .dr-dist-head { display: flex; flex-direction: column; gap: 8px; }
 .dr-dist-progress { font-size: 12px; font-weight: 600; }
 .dr-dist-sub { font-weight: 400; color: var(--dsw-alias-label-secondary, #777); }
-.dr-dist-failed { color: var(--dsw-alias-label-error, #c0392b); }
+.dr-dist-failed { color: var(--dsw-alias-state-error-primary, #c0392b); }
 .dr-dist-note {
   font-size: 11.5px;
   line-height: 1.5;
@@ -2720,7 +2758,7 @@ export const CSS_DISTILL = `
   align-items: center;
   gap: 6px;
 }
-.dr-dist-note-bad { background: rgba(210, 67, 56, 0.09); color: var(--dsw-alias-label-error, #c0392b); }
+.dr-dist-note-bad { background: rgba(210, 67, 56, 0.09); color: var(--dsw-alias-state-error-primary, #c0392b); }
 .dr-dist-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .dr-dist-toast { margin: 0 12px 8px; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #777); }
 .dr-dist-skeleton {
@@ -2750,13 +2788,13 @@ export const CSS_DISTILL = `
 .dr-dist-row-head { display: flex; align-items: center; gap: 7px; font-size: 12px; }
 .dr-dist-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
 .dr-dist-badge { font-size: 10.5px; padding: 1px 5px; border-radius: var(--dsw-radius-sm, 4px); background: rgba(0, 0, 0, 0.07); }
-.dr-dist-row-error { font-size: 11px; color: var(--dsw-alias-label-error, #c0392b); }
+.dr-dist-row-error { font-size: 11px; color: var(--dsw-alias-state-error-primary, #c0392b); }
 .dr-dist-detail { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; }
 .dr-dist-thesis { font-weight: 600; line-height: 1.5; }
 .dr-dist-points { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
 .dr-dist-points .is-unverified .dr-dist-point-claim { text-decoration: line-through; opacity: 0.7; }
 .dr-dist-quote { display: block; margin-top: 2px; color: var(--dsw-alias-label-secondary, #777); font-style: italic; }
-.dr-dist-warn { margin-left: 4px; color: var(--dsw-alias-label-error, #c0392b); }
+.dr-dist-warn { margin-left: 4px; color: var(--dsw-alias-state-error-primary, #c0392b); }
 .dr-dist-terms { margin: 0; display: flex; flex-direction: column; gap: 3px; }
 .dr-dist-term { display: grid; grid-template-columns: 72px 1fr; gap: 6px; }
 .dr-dist-term dt { font-weight: 600; }
@@ -2774,7 +2812,7 @@ export const CSS_DISTILL = `
 .dr-dist-method-name { font-weight: 600; }
 .dr-dist-method-when, .dr-dist-method-check { color: var(--dsw-alias-label-secondary, #777); }
 .dr-dist-steps { margin: 0; padding-left: 16px; }
-.dr-dist-foot { font-size: 10.5px; line-height: 1.5; color: var(--dsw-alias-label-quaternary, #8a8a8a); }
+.dr-dist-foot { font-size: 10.5px; line-height: 1.5; color: var(--dsw-alias-label-caption, #8a8a8a); }
 `
 
 
@@ -2821,7 +2859,7 @@ export const CSS_SETTINGS_GROUPS = `
 .dr-set-group {
   margin: 14px 0 6px;
   padding-top: 10px;
-  border-top: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+  border-top: 1px solid var(--dsw-alias-border-l3, #e7e4dd);
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--dsw-alias-label-tertiary, #8a8a8a);
@@ -2871,7 +2909,7 @@ export const CSS_LEGADO = `
 .dr-tab.is-on {
   background: var(--dsw-alias-bg-layer-1, #ffffff);
   color: var(--dsw-alias-label-primary, #22262b);
-  box-shadow: 0 1px 3px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.12));
+  box-shadow: 0 1px 3px rgba(23, 26, 33, 0.12);
   font-weight: 600;
 }
 /* 弹窗标题：h2 原来是浏览器默认字号，显小 */
@@ -2899,7 +2937,7 @@ export const CSS_LEGADO = `
 .dr-legado-body .dr-input {
   height: 36px;
   padding: 0 12px;
-  border: 1px solid var(--dsw-alias-line-tertiary, #e0ddd6);
+  border: 1px solid var(--dsw-alias-border-l3, #e0ddd6);
   border-radius: var(--dsw-radius-md, 10px);
   background: var(--dsw-alias-bg-layer-1, #ffffff);
   color: var(--dsw-alias-label-primary, #22262b);
@@ -2909,7 +2947,7 @@ export const CSS_LEGADO = `
 .dr-legado-body .dr-input:focus {
   outline: none;
   border-color: var(--dsw-alias-brand-primary, #4a7dff);
-  box-shadow: 0 0 0 3px var(--dsw-alias-brand-soft, rgba(74, 125, 255, 0.18));
+  box-shadow: 0 0 0 3px var(--dsh-reading-ui-accent-soft, rgba(74, 125, 255, 0.18));
 }
 .dr-legado-body .dr-input::placeholder { color: var(--dsw-alias-label-tertiary, #a0a4ac); }
 .dr-legado-body .dr-btn { height: 36px; padding: 0 16px; font-size: 13px; }
@@ -2921,7 +2959,7 @@ export const CSS_LEGADO = `
   align-items: center;
   gap: 4px;
   padding: 26px 12px;
-  border: 1px dashed var(--dsw-alias-line-tertiary, #e0ddd6);
+  border: 1px dashed var(--dsw-alias-border-l3, #e0ddd6);
   border-radius: var(--dsw-radius-lg, 12px);
   color: var(--dsw-alias-label-tertiary, #8a8f98);
   font-size: 12.5px;
@@ -2943,9 +2981,9 @@ export const CSS_LEGADO = `
   gap: 10px;
   align-items: flex-start;
   padding: 10px 12px;
-  border: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+  border: 1px solid var(--dsw-alias-border-l3, #e7e4dd);
   border-radius: var(--dsw-radius-md, 8px);
-  background: var(--dsw-alias-bg-primary, #fff);
+  background: var(--dsw-alias-bg-layer-1, #fff);
 }
 .dr-legado-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dr-legado-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, #22262b); }
@@ -2965,8 +3003,8 @@ export const CSS_LEGADO = `
 }
 .dr-legado-item .dr-btn { flex: 0 0 auto; align-self: center; }
 .dr-legado-item:hover {
-  border-color: var(--dsw-alias-line-secondary, #d3cfc6);
-  box-shadow: 0 2px 8px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.08));
+  border-color: var(--dsw-alias-border-l4, #d3cfc6);
+  box-shadow: 0 2px 8px rgba(23, 26, 33, 0.08);
 }
 .dr-legado-failures { font-size: 11.5px; color: var(--dsw-alias-label-secondary, #5b6069); }
 .dr-legado-failures ul { margin: 6px 0 0; padding-left: 18px; }
@@ -2981,7 +3019,7 @@ export const CSS_LEGADO = `
   padding-left: 8px;
 }
 @media (max-width: 720px) {
-  .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsw-radius-none, 0); }
+  .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsh-reading-ui-r-none, 0); }
   .dr-legado-item { flex-direction: column; align-items: stretch; }
   .dr-legado-item .dr-btn { width: 100%; }
 }
@@ -3010,7 +3048,7 @@ const CSS_AIMODEL = `
 }
 .dr-aimodel-label {
   font-size: 12px;
-  color: var(--dsw-alias-text-secondary, #6b6b6b);
+  color: var(--dsw-alias-label-secondary, #6b6b6b);
   white-space: nowrap;
 }
 .dr-aimodel-select {
@@ -3026,7 +3064,7 @@ const CSS_AIMODEL = `
 }
 .dr-aimodel-note {
   font-size: 11.5px;
-  color: var(--dsw-alias-text-tertiary, #8a8a8a);
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3045,7 +3083,250 @@ const CSS_AIMODEL = `
 }
 `
 
-  return CSS_TOKENS + CSS + CSS_BASE + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL
+/**
+ * 论文版式询问弹窗（0.10.0）
+ *
+ * 卡片宽度跟着内容走，但别让它超过手机宽度；两个按钮左右并排，
+ * 手机上自动堆成上下——手指点得着的尺寸比排版整齐重要。
+ */
+const CSS_PAPER = `
+.dr-paper-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 12px 0;
+  padding: 8px 12px;
+  background: var(--dsh-reading-ui-bg-soft, #f5f4f1);
+  border: 0.5px solid var(--dsh-reading-ui-rule, #e2ded4);
+  border-radius: var(--dsh-reading-ui-r-md, 10px);
+  font-size: 12.5px;
+  color: var(--dsh-reading-ui-ink, #333842);
+}
+.dr-paper-banner-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  line-height: 1.6;
+}
+@media (max-width: 640px) {
+  .dr-paper-banner { flex-direction: column; align-items: stretch; }
+  .dr-paper-banner .dr-btn { width: 100%; }
+}
+.dr-paper-ask {
+  max-width: 460px;
+  width: calc(100% - 32px);
+}
+.dr-paper-ask .dr-modal-hint {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--dsw-alias-label-secondary, #5c5c5c);
+  margin: 0 0 10px;
+}
+.dr-paper-ask-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--dsh-reading-ui-accent, #2f6bdd);
+  background: var(--dsh-reading-ui-bg-soft, #f5f4f1);
+  border-radius: var(--dsh-reading-ui-r-sm, 6px);
+  word-break: break-word;
+}
+.dr-paper-ask .dr-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+@media (max-width: 520px) {
+  .dr-paper-ask .dr-modal-actions { flex-direction: column-reverse; }
+  .dr-paper-ask .dr-modal-actions .dr-btn { width: 100%; }
+}
+`
+
+/**
+ * Obsidian 读书笔记侧栏（0.13.0）
+ *
+ * 一列条目 + 一条预览。条目要一眼看清「叫什么、写了没、上次什么时候写的」；
+ * 预览是只读的 pre，它不是编辑器，是「你将要写进去的东西」的验货台。
+ */
+const CSS_NOTES = `
+.dr-notes-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 14px; height: 100%; min-height: 0; overflow: auto; }
+.dr-notes-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dr-notes-vault {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dr-notes-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dr-notes-warn {
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 7px 10px;
+  border-radius: var(--dsh-reading-ui-r-sm, 6px);
+  background: rgba(210, 67, 56, 0.08);
+  color: var(--dsw-alias-state-error-primary, #c0392b);
+}
+.dr-notes-notice {
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 10px;
+  border-radius: var(--dsh-reading-ui-r-sm, 6px);
+  background: rgba(47, 158, 95, 0.09);
+  color: var(--dsw-alias-state-success-primary, #2f7a4f);
+}
+.dr-notes-list { display: flex; flex-direction: column; gap: 8px; }
+.dr-notes-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--dsh-reading-ui-rule, #e3e1dc);
+  border-radius: var(--dsh-reading-ui-r-md, 8px);
+  background: var(--dsh-reading-ui-bg-card, #fbfaf7);
+}
+.dr-notes-row-ok { border-color: rgba(47, 158, 95, 0.35); }
+.dr-notes-row-head { display: flex; align-items: center; gap: 7px; }
+.dr-notes-row-label { font-size: 13px; font-weight: 600; }
+.dr-notes-badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--dsh-reading-ui-bg-soft, #f0eeea);
+  color: var(--dsw-alias-label-secondary, #6b6b6b);
+  white-space: nowrap;
+}
+.dr-notes-row-ok .dr-notes-badge { background: rgba(47, 158, 95, 0.14); color: #2f7a4f; }
+.dr-notes-path {
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary, #9a9a9a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dr-notes-row-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dr-notes-time { font-size: 11px; color: var(--dsw-alias-label-tertiary, #9a9a9a); }
+.dr-notes-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px dashed var(--dsh-reading-ui-rule, #ddd9d2);
+  border-radius: var(--dsh-reading-ui-r-md, 8px);
+  background: var(--dsh-reading-ui-bg-soft, #f7f5f1);
+}
+.dr-notes-preview-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+.dr-notes-preview-path { font-size: 11px; color: var(--dsw-alias-label-tertiary, #9a9a9a); word-break: break-all; }
+.dr-notes-preview-text {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  font-family: var(--dsh-reading-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--dsh-reading-ui-bg-card, #fff);
+  border-radius: var(--dsh-reading-ui-r-sm, 6px);
+  padding: 8px;
+}
+.dr-notes-foot { margin-top: auto; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; line-height: 1.65; color: var(--dsw-alias-label-tertiary, #8a8a8a); }
+.dr-notes-pending { color: var(--dsw-alias-state-warn-label, #a8720a); }
+/* 「读者画像 / 人物关系 / 跨书主题 / 我写过什么」四张卡共用的外壳（0.13.0）。
+   它们都是笔记面板里的次级卡片：比下面的文件清单轻一档，比正文重一档 ——
+   用 1px 描边 + 极浅底，不抢「全部写入」那个主按钮的视觉重量。 */
+.dr-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 9px;
+  border: 1px solid var(--dsh-reading-ui-rule, rgba(0, 0, 0, 0.09));
+  border-radius: var(--dsh-reading-ui-r-md, 8px);
+  background: var(--dsh-reading-ui-bg-soft, #f7f6f3);
+}
+.dr-profile-head { display: flex; align-items: center; gap: 6px; }
+.dr-profile-title { font-size: 12px; font-weight: 600; }
+.dr-profile-line {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  word-break: break-word;
+}
+.dr-profile-sub {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-tertiary, #8a8a8a);
+  word-break: break-word;
+}
+/* 空态卡片不描边：没有内容时再画个框，看起来像加载失败 */
+.dr-profile-empty { border-style: dashed; background: transparent; }
+/* 「我写过什么」里那一列小标题：贴紧一点，一眼能数清几条 */
+.dr-mine .dr-notes-path { display: flex; flex-direction: column; gap: 1px; }
+
+
+/* 设置抽屉里「输入框 + 按钮」一行放：库路径、子目录名都是这个形状。
+   窄了就让输入框掉下去占满一整行，按钮贴在下面。 */
+.dr-field-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.dr-field-row .dr-input { flex: 1 1 180px; min-width: 0; }
+.dr-field-path {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--dsw-alias-label-secondary, #5b6069);
+  word-break: break-all;
+  background: var(--dsh-reading-ui-bg-soft, #f5f4f1);
+  border-radius: var(--dsh-reading-ui-r-sm, 6px);
+  padding: 5px 8px;
+}
+.dr-field .dr-linkbtn {
+  align-self: flex-start;
+  font-size: 12px;
+}
+/* 书架卡片右下角的「笔记 N」（0.13.0）：点它直接开这本书的笔记页。
+   绝对定位挂在 .dr-book-cell 上，和右上角的 ⋯ / × 同一套坐标体系——
+   卡片本身是 <button>，按钮不能套按钮，所以它是格子的兄弟节点。 */
+.dr-notes-chip {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border: 0;
+  border-radius: var(--dsh-reading-ui-r-sm, 6px);
+  background: rgba(47, 107, 221, 0.10);
+  color: var(--dsh-reading-ui-accent, #2f6bdd);
+  font-size: 10.5px;
+  line-height: 1.6;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dr-notes-chip:hover {
+  background: var(--dsh-reading-ui-accent, #2f6bdd);
+  color: #ffffff;
+}
+.dr-notes-chip:focus-visible {
+  outline: 2px solid var(--dsh-reading-ui-accent, #2f6bdd);
+  outline-offset: 2px;
+}
+/* 角标压着的那行「已读 x%」要让出位置，不然字叠字 */
+.dr-book-meta-notes { padding-right: 52px; }
+
+@media (max-width: 720px) {
+  .dr-notes-head { flex-direction: column; align-items: stretch; }
+  .dr-notes-actions .dr-btn { flex: 1 1 40%; }
+  /* 窄屏卡片更小，角标跟着收一点，别把「已读 12%」挤掉 */
+  .dr-notes-chip { bottom: 10px; right: 10px; font-size: 10px; }
+  .dr-book-meta-notes { padding-right: 46px; }
+}
+`
+
+  return CSS_TOKENS + CSS + CSS_BASE + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL + CSS_PAPER + CSS_NOTES
 }
 
 /**

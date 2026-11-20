@@ -17,7 +17,7 @@
 
 import { call, getDeviceId, humanizeError } from './api.js'
 import { colorStyle, HIGHLIGHT_ORDER, HIGHLIGHT_COLORS } from './style.js'
-import { AiStatusChip } from './ai.js'
+import { AiStatusChip, AiModelBar } from './ai.js'
 import * as CFI from './cfi.js'
 import { fingerprint, makeBookmark, makeHighlight, makeNote } from './contract.js'
 
@@ -1009,6 +1009,48 @@ export function NoteEditor(props) {
 }
 
 /**
+ * 「问 AI」的模式选择器（0.11.0）。
+ *
+ * 模式的**中文名与说明全在后端**（ask.presets）返回，这里只负责把
+ * id / name 摆成一个原生 <select>。为什么不硬编在客户端：文案随时可能改，
+ * 改一次要发一次包不划算。
+ *
+ * 没有 presets（还没拉到 / 后端没给）就整个不渲染——下拉消失，面板其余照常，
+ * 绝不因为一个选择器把整个面板搞白。选中的 id 不在清单里（含空串＝没选过）时
+ * 显示第一项：后端 ask.presets 的第一项就是它的默认模式（general），所以
+ * 显示的和真正发出去的始终是同一个。
+ */
+function AskModeSelect(props) {
+  const presets = Array.isArray(props.presets)
+    ? props.presets.filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+    : []
+  if (presets.length === 0) return null
+  const mode = typeof props.mode === 'string' ? props.mode : ''
+  const selected = presets.some((item) => item.id === mode) ? mode : presets[0].id
+  return h(
+    'select',
+    {
+      className: 'dr-select dr-ask-mode',
+      // 头部这一行已经有标题、模型选择、轮次、状态点、关闭按钮，窄屏上再塞一个
+      // 不定宽的下拉就会挤出边界。给它一个上限，长模式名由浏览器自己截断；
+      // 不碰圆角与配色，外观仍走 .dr-select 那一套。
+      style: { minWidth: 0, maxWidth: '45%' },
+      title: '问 AI 模式',
+      'aria-label': '问 AI 模式',
+      value: selected,
+      onChange: (event) => {
+        if (typeof props.onChange === 'function') props.onChange(event.target.value)
+      },
+    },
+    presets.map((item) => h(
+      'option',
+      { key: item.id === '' ? 'default' : item.id, value: item.id, title: typeof item.description === 'string' ? item.description : '' },
+      item.name,
+    )),
+  )
+}
+
+/**
  * 「问 AI」面板：贴着屏幕底部滑出，带原文摘要 + 上下文 + 输入框 + 回答。
  *
  * 0.4.0 的精修点（用户原话「问 AI 的界面更精细一点」）：
@@ -1173,6 +1215,11 @@ export function AskPanel(props) {
         'div',
         { className: 'dr-ask-head' },
         h('span', { className: 'dr-ask-title' }, '问 AI'),
+        h(AskModeSelect, {
+          mode: props.mode,
+          presets: props.presets,
+          onChange: props.onModeChange,
+        }),
         h(AiModelBar, { compact: true, label: '分析模型' }),
         round >= 2 ? h('span', { className: 'dr-chip dr-ask-round' }, `第 ${round} 轮`) : null,
         // AI 状态点：失败前就能看出「现在根本连不上」，不用先试一次再怀疑

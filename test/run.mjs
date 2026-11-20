@@ -33,21 +33,46 @@ const SUITES = [
   'txt_test.mjs',
   'mobi_test.mjs',
   'pdf_test.mjs',
+  'paper_test.mjs',
+  // 文献集造书（题录 → EPUB 的纯函数 + 入书架，不联网）
+  'papercollect_test.mjs',
   'bookformat_test.mjs',
   'store_test.mjs',
   'routes_test.mjs',
   // 「找书」纯函数层（模板拼接 / 候选抽取 / 文件名猜测，不联网）
   'source_test.mjs',
+  // 知网检索层（HTML → 题录的纯函数 + 可注入 fetch 的网络层，不联网）
+  'cnki_test.mjs',
   'legado_test.mjs',
   'shelf_ui_test.mjs',
+  // 知网检索界面的纯函数层（题名归一 / 角标判定 / 题录拼装，不联网）
+  'cnki_ui_test.mjs',
   'layout_css_test.mjs',
+  'frame_metrics_test.mjs',
   'contrast_test.mjs',
   'search_test.mjs',
   'meta_test.mjs',
   'coach_skill_test.mjs',
+  'skill_bundle_test.mjs',
+  'ask_presets_test.mjs',
   'ai_test.mjs',
   'aimodel_test.mjs',
   'distill_ui_test.mjs',
+  // Obsidian 笔记：锚块协议（纯函数）+ 库读写（临时目录，不碰真库）
+  'blocks_test.mjs',
+  'vault_test.mjs',
+  'notesync_test.mjs',
+  'notes_routes_test.mjs',
+  // 问完一句，笔记自己长出来（L0 自动归位）
+  'notes_autowrite_test.mjs',
+  // 读者画像：从「问 AI」的记录里读出这位读者怎么读（纯函数 + 缓存）
+  'profile_test.mjs',
+  // 画像真的进了蒸馏 prompt、缓存真的按条数失效（走路由）
+  'profile_routes_test.mjs',
+  // 人物关系：判据只认分类、每条边回源核对、失败也落盘（走路由，模型用桩）
+  'relations_test.mjs',
+  // 跨书主题：抽词只留实词、三道门槛、立页只追加讨论记录、总览往返（走路由）
+  'threads_test.mjs',
   // 锚点核心（maker-anchor）
   'cfi_test.mjs',
   'contract_test.mjs',

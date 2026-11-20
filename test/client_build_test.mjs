@@ -33,6 +33,7 @@ const MODULES = [
   'style.js',
   'shelf.js',
   'toc.js',
+  'notes.js',
   'reader.js',
   'annotate.js',
   'app.js',

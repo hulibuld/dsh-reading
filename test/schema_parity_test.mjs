@@ -104,6 +104,10 @@ function samples() {
   }
   cases.push(['qa-empty-answer', { ...qa, answer: '' }])
   cases.push(['qa-extra-field', { ...qa, anchorCfi: CFI_RANGE }])
+  // 0.11.0：问 AI 的模式 id。落盘的 qa.jsonl 会带它，契约必须认，
+  // 否则同步时这条记录会被判「schema 里没有这个字段」。
+  cases.push(['qa-with-mode', { ...qa, mode: 'paper' }])
+  cases.push(['qa-mode-too-long', { ...qa, mode: 'x'.repeat(33) }])
 
   const quarantine = makeQuarantine({
     reason: 'fingerprint_drift',

@@ -578,6 +578,109 @@ export default async function run() {
     )
     assert.equal(Math.round(pdfProgressBack.percent * 100), 50, 'PDF 书的进度要能存能取')
 
+    // 10.3.5) 论文版式（0.10.0）：导入只报告特征，用户选了才按论文排。
+    const paperPages = [
+      [
+        '论鲁迅《祝福》中的叙述时间',
+        '钱禹舟',
+        '云南经济管理学院 教育学院，云南 昆明 650106',
+        '摘要：本文讨论《祝福》里两种叙述时间，二者并不重合。',
+        '关键词：鲁迅；祝福；叙述时间',
+      ],
+      ['一、问题的提出', '《祝福》被反复讨论，多数研究只看人物与主题。'],
+      ['参考文献', '[1] 鲁迅. 彷徨[M]. 北京: 北新书局, 1926.'],
+    ]
+    const paperImported = okValue(
+      await call(
+        handler2,
+        postJson(`${API_PREFIX}/shelf.import`, {
+          filename: '论文.pdf',
+          dataBase64: buildChapteredPdf({ pages: paperPages }).toString('base64'),
+        }),
+      ),
+      'shelf.import(paper)',
+    )
+    assert.equal(paperImported.meta.pdfLayout, 'book', '导入时默认按普通书排，不替用户决定')
+    assert.equal(paperImported.meta.pdfPaperHint.looksLikePaper, true, '要报告「像论文」让界面问一句')
+    // 重复导入同一本：文件不重写，但旧库里的 meta 可能没有 pdfPaperHint（早先版本导的）。
+    // 那种情况必须补算，否则用户再导一次还是看不到询问，以为功能没做。
+    const reimported = okValue(
+      await call(
+        handler2,
+        postJson(`${API_PREFIX}/shelf.import`, {
+          filename: '论文.pdf',
+          dataBase64: buildChapteredPdf({ pages: paperPages }).toString('base64'),
+        }),
+      ),
+      'shelf.import(paper, again)',
+    )
+    assert.equal(reimported.bookHash, paperImported.bookHash, '同一本书重复导入还是同一本')
+    assert.equal(reimported.meta.pdfPaperHint.looksLikePaper, true, '重复导入也要把版式线索带回来')
+    const paperDir = paperImported.bookHash.slice(0, 16)
+
+    // 选「按普通书排版」而它本来就是普通书：不许重排、更不许清掉阅读位置。
+    okValue(
+      await call(
+        handler2,
+        postJson(`${API_PREFIX}/progress.put`, {
+          bookHash: paperDir,
+          cfi: 'epubcfi(/6/4[ch0001]!/4/2/2)',
+          chapterHref: 'text/ch001.xhtml',
+          percent: 0.42,
+        }),
+      ),
+      'progress.put(paper)',
+    )
+    okValue(
+      await call(handler2, postJson(`${API_PREFIX}/book.layout`, { bookHash: paperDir, layout: 'book' })),
+      'book.layout(book, same)',
+    )
+    const keptProgress = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/progress.get`, { bookHash: paperDir })),
+      'progress.get(paper after same-layout)',
+    )
+    assert.equal(Math.round(keptProgress.percent * 100), 42, '版式没变就不该清掉阅读进度')
+
+
+    const asPaper = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/book.layout`, { bookHash: paperDir, layout: 'paper' })),
+      'book.layout(paper)',
+    )
+    assert.equal(asPaper.book.pdfLayout, 'paper', '用户选了论文就该记下来')
+
+    const paperToc = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/book.toc`, { bookHash: paperDir })),
+      'book.toc(paper)',
+    )
+    assert.ok(
+      paperToc.toc.some((item) => item.label === '参考文献'),
+      '论文版式下参考文献要单独成一章',
+    )
+    const paperChapter = await call(
+      handler2,
+      get(`${API_PREFIX}/chapter?book=${paperDir}&href=${encodeURIComponent(paperToc.toc[0].href)}`),
+    )
+    assert.equal(paperChapter.statusCode, 200)
+    assert.ok(paperChapter.text().includes('pp-title'), '论文首页要有标题样式')
+
+    const backToBook = okValue(
+      await call(handler2, postJson(`${API_PREFIX}/book.layout`, { bookHash: paperDir, layout: 'book' })),
+      'book.layout(book)',
+    )
+    assert.equal(backToBook.book.pdfLayout, 'book', '选错了要能改回来')
+
+    const badLayout = await call(
+      handler2,
+      postJson(`${API_PREFIX}/book.layout`, { bookHash: paperDir, layout: 'weird' }),
+    )
+    assert.equal(badLayout.statusCode, 400, '版式只认 paper / book')
+
+    // 论文这本书测完就删掉，别影响后面「删书计数」那条断言。
+    okValue(
+      await call(handler2, postJson(`${API_PREFIX}/shelf.remove`, { bookHash: paperDir, confirm: true })),
+      'shelf.remove(paper)',
+    )
+
     // 10.4) 「粘贴链接导入」与「找书」（0.5.1）：整条链路不碰外网——
     // 起一个临时 http 服务器冒充「某个站点」，只提供一本 EPUB 和一个搜索结果页。
     // 这样测的是真实的 fetch / 重定向 / content-length / 流式读法，而不是 mock。
@@ -605,6 +708,26 @@ export default async function run() {
         const page = Buffer.from(searchPage, 'utf8')
         res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(page.length) })
         res.end(page)
+        return
+      }
+      if (requestUrl.pathname === '/sources.json') {
+        // 「贴链接导入书源」用：一个只有一条源的最小 JSON，形状照 Legado 的导出。
+        const body = Buffer.from(JSON.stringify([{
+          bookSourceUrl: 'https://link.invalid',
+          bookSourceName: '链接来的源',
+          searchUrl: '/search?key={{key}}',
+          ruleSearch: { bookList: 'class.item', name: 'tag.a@text', bookUrl: 'tag.a@href' },
+          ruleToc: { chapterList: 'class.toc@tag.a', chapterName: 'tag.a@text', chapterUrl: 'tag.a@href' },
+          ruleContent: { content: '@css:#content@html' },
+        }]), 'utf8')
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(body.length) })
+        res.end(body)
+        return
+      }
+      if (requestUrl.pathname === '/page.html') {
+        const body = Buffer.from('<!doctype html><html><body>这是网页</body></html>', 'utf8')
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(body.length) })
+        res.end(body)
         return
       }
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
@@ -791,6 +914,98 @@ export default async function run() {
       'legado.remove',
     )
     assert.equal(removed.total, 0, '删除后应清空')
+
+    // 14.1) 「贴链接导入书源」：服务器替用户把 JSON 抓下来再解析。
+    // 单起一个假站点，只提供三样东西——书源 JSON、一个 HTML 页面、别的都 404。
+    // 仍然不碰外网：fetch 打的是 127.0.0.1。
+    const sourceServer = createServer((req, res) => {
+      const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1')
+      if (requestUrl.pathname === '/sources.json') {
+        const body = Buffer.from(JSON.stringify([{
+          bookSourceUrl: 'https://link.invalid',
+          bookSourceName: '链接来的源',
+          searchUrl: '/search?key={{key}}',
+          ruleSearch: { bookList: 'class.item', name: 'tag.a@text', bookUrl: 'tag.a@href' },
+          ruleToc: { chapterList: 'class.toc@tag.a', chapterName: 'tag.a@text', chapterUrl: 'tag.a@href' },
+          ruleContent: { content: '@css:#content@html' },
+        }]), 'utf8')
+        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-length': String(body.length) })
+        res.end(body)
+        return
+      }
+      // 声明体积超上限的响应：体积闸门先看 content-length，
+      // 不能真把几十兆拉下来再判断（那样既慢又占内存）。
+      if (requestUrl.pathname === '/huge.json') {
+        res.writeHead(200, {
+          'content-type': 'application/json; charset=utf-8',
+          'content-length': String(40 * 1024 * 1024),
+        })
+        res.end('[{"bookSourceUrl":"https://huge.invalid"}]')
+        return
+      }
+      if (requestUrl.pathname === '/page.html') {
+        const body = Buffer.from('<!doctype html><html><body>这是网页</body></html>', 'utf8')
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-length': String(body.length) })
+        res.end(body)
+        return
+      }
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('not found')
+    })
+    await new Promise((resolve) => sourceServer.listen(0, '127.0.0.1', resolve))
+    const sourceOrigin = `http://127.0.0.1:${sourceServer.address().port}`
+    try {
+      const fromLink = okValue(
+        await call(handler2, postJson(`${API_PREFIX}/source.legado.import`, { url: `${sourceOrigin}/sources.json` })),
+        'legado.import(url)',
+      )
+      assert.ok(fromLink.added >= 1, `从链接导入应当新增书源，实际 added=${fromLink.added}`)
+
+      const linkListed = okValue(await call(handler2, postJson(`${API_PREFIX}/source.legado.list`, {})), 'legado.list(链接)')
+      assert.ok(
+        linkListed.sources.some((item) => item.name === '链接来的源'),
+        '从链接抓下来的源要出现在列表里',
+      )
+
+      // 给的地址返回网页而不是书源 JSON：要说清「这是网页」，不能让用户看着一堆 HTML 猜
+      const htmlNotJson = await call(
+        handler2,
+        postJson(`${API_PREFIX}/source.legado.import`, { url: `${sourceOrigin}/page.html` }),
+      )
+      assert.equal(htmlNotJson.statusCode, 400, `网页地址应当 400，实际 ${htmlNotJson.statusCode}`)
+      assert.equal(htmlNotJson.json().error.code, 'E_LEGADO_NOT_JSON', '要明确区分「这是网页」')
+      assert.match(htmlNotJson.json().error.message, /[\u4e00-\u9fa5]/, '错误文案必须是中文')
+
+      // 不是 http(s) 的地址一律不收
+      const notHttp = await call(
+        handler2,
+        postJson(`${API_PREFIX}/source.legado.import`, { url: 'file:///etc/passwd' }),
+      )
+      assert.equal(notHttp.statusCode, 400, `file:// 应当 400，实际 ${notHttp.statusCode}`)
+      assert.equal(notHttp.json().error.code, 'E_SOURCE_BAD_URL', '只认 http(s)')
+
+      // 声明 40 MB 的地址：体积闸门按 content-length 直接拒，不把整包拉下来。
+      // 这条同时守住「上限不是 24 MB」——真实的整包书源最大已到 21 MB。
+      const tooBig = await call(
+        handler2,
+        postJson(`${API_PREFIX}/source.legado.import`, { url: `${sourceOrigin}/huge.json` }),
+      )
+      assert.equal(tooBig.statusCode, 400, `超大文件应当 400，实际 ${tooBig.statusCode}`)
+      assert.equal(tooBig.json().error.code, 'E_SOURCE_TOO_BIG', '要能说清「太大了」')
+      assert.match(tooBig.json().error.message, /[\u4e00-\u9fa5]/, '错误文案必须是中文')
+      assert.ok(
+        !/maxBytes|content-length|huge\.invalid/i.test(tooBig.json().error.message),
+        '错误文案不许带内部字段名',
+      )
+
+      okValue(
+        await call(handler2, postJson(`${API_PREFIX}/source.legado.remove`, { url: 'https://link.invalid' })),
+        'legado.remove(链接来的源)',
+      )
+    } finally {
+      sourceServer.closeAllConnections?.()
+      await new Promise((resolve) => sourceServer.close(resolve))
+    }
     assert.equal(noAi.json().ok, false, '失败信封必须是 ok:false')
   } finally {
     await rm(root, { recursive: true, force: true })

@@ -31,7 +31,21 @@ import {
   distillSkeleton,
   getDeviceId,
   humanizeError,
+  notesMine,
+  notesPreview,
+  notesStatus,
+  notesSync,
+  profileGet,
+  profileRebuild,
+  relationsBuild,
+  relationsClear,
+  relationsGet,
+  threadBuild,
+  threadList,
   searchBook,
+  setBookLayout,
+  vaultChoose,
+  vaultDetect,
 } from './api.js'
 import { ensureStyle, cssText, HIGHLIGHT_COLORS, HIGHLIGHT_ORDER } from './style.js'
 import { ShelfView } from './shelf.js'
@@ -57,6 +71,7 @@ import { ensureQaStyle } from './style-qa.js'
 import { SearchPanel } from './search.js'
 import { AiPanel, AiModelPicker, statusSummary } from './ai.js'
 import { DistillPanel, distillSummary, downloadMarkdown, exportFilename } from './distill.js'
+import { NotesPanel, autowriteText, obsidianUrl, relationsNotice as relationsBatchNotice } from './notes.js'
 
 /**
  * 取选区所在段落的全文，当作「当前工作内容」交给 AI（0.8.0）。
@@ -158,6 +173,8 @@ const DEFAULT_SETTINGS = {
   theme: 'auto',
   columns: 2,
   fontFamily: '',
+  // 问 AI 的模式预设 id。空串＝没选过，由后端退回 general（一般问答）
+  aiAskPreset: '',
 }
 
 /** 统一的加载态。 */
@@ -220,6 +237,59 @@ function SettingsDrawer(props) {
   const lineHeight = Number.isFinite(settings.lineHeight) ? settings.lineHeight : 1.75
   const themeKey = typeof settings.theme === 'string' ? settings.theme : 'light'
   const fontKey = typeof settings.fontFamily === 'string' ? settings.fontFamily : ''
+
+  // ── Obsidian 库（0.13.0）
+  // 库位置是这个抽屉里唯一一个「必须点一下才生效」的字段：它要落盘、要建子目录，
+  // 还得先确认那真是个能写的文件夹。所以它不走 change() 的去抖，走 vaultChoose。
+  const vaultPath = typeof settings.obsidianVault === 'string' ? settings.obsidianVault : ''
+  const vaultSubdir = typeof settings.obsidianSubdir === 'string' ? settings.obsidianSubdir : 'dsh-reading'
+  const vaultAutoWrite = settings.obsidianAutoWrite !== false
+  const vaultBackup = settings.obsidianBackup !== false
+  const [vaults, setVaults] = useState(null)
+  const [vaultBusy, setVaultBusy] = useState('')
+  const [vaultError, setVaultError] = useState('')
+  const [vaultInput, setVaultInput] = useState(vaultPath)
+
+  const detect = useCallback(() => {
+    setVaultBusy('detect')
+    setVaultError('')
+    vaultDetect()
+      .then((data) => {
+        setVaults(data && Array.isArray(data.vaults) ? data.vaults : [])
+      })
+      .catch((failure) => {
+        setVaults([])
+        setVaultError(humanizeError(failure))
+      })
+      .finally(() => setVaultBusy(''))
+  }, [])
+
+  // 抽屉一打开就去问一次本机有哪些库：大多数人不想手打路径。
+  useEffect(() => {
+    detect()
+  }, [detect])
+
+  useEffect(() => {
+    setVaultInput(vaultPath)
+  }, [vaultPath])
+
+  const choose = useCallback((target) => {
+    const value = typeof target === 'string' ? target.trim() : ''
+    if (value === '') {
+      setVaultError('先填一个库目录，或点上面检测到的那个。')
+      return
+    }
+    setVaultBusy('choose')
+    setVaultError('')
+    vaultChoose(value)
+      .then((data) => {
+        const saved = data && typeof data.path === 'string' ? data.path : value
+        if (typeof props.onChange === 'function') props.onChange({ obsidianVault: saved })
+        setVaultInput(saved)
+      })
+      .catch((failure) => setVaultError(humanizeError(failure)))
+      .finally(() => setVaultBusy(''))
+  }, [props.onChange])
 
   const change = (patch) => {
     if (typeof props.onChange === 'function') props.onChange(patch)
@@ -364,6 +434,97 @@ function SettingsDrawer(props) {
             onClick: () => change({ motion: 'off' }),
           }, '关掉'),
         ),
+      ),
+      group('Obsidian 笔记'),
+      // 库位置：能自动认出来的就列成按钮，认不出来才让人手填。
+      h('div', { className: 'dr-field' },
+        h('div', { className: 'dr-field-label' }, '笔记库'),
+        vaultPath !== ''
+          ? h('div', { className: 'dr-field-path', title: vaultPath }, vaultPath)
+          : h('div', { className: 'dr-field-hint' }, '还没选库。选了之后，这本书的笔记会写进库里的一个子文件夹。'),
+        vaults !== null && vaults.length > 0
+          ? h('div', { className: 'dr-chips' },
+            vaults.map((item) => h('button', {
+              key: item.path,
+              type: 'button',
+              className: 'dr-chip' + (vaultPath === item.path ? ' is-on' : ''),
+              title: item.path,
+              disabled: vaultBusy !== '',
+              onClick: () => choose(item.path),
+            }, item.name || item.path)))
+          : null,
+        h('div', { className: 'dr-field-row' },
+          h('input', {
+            type: 'text',
+            className: 'dr-input',
+            value: vaultInput,
+            placeholder: '库目录的完整路径',
+            'aria-label': 'Obsidian 库目录',
+            onChange: (event) => setVaultInput(event.target.value),
+          }),
+          h('button', {
+            type: 'button',
+            className: 'dr-btn dr-btn-sm',
+            disabled: vaultBusy !== '',
+            onClick: () => choose(vaultInput),
+          }, vaultBusy === 'choose' ? '检查中…' : '用这个')),
+        h('button', {
+          type: 'button',
+          className: 'dr-linkbtn',
+          disabled: vaultBusy !== '',
+          onClick: detect,
+        }, vaultBusy === 'detect' ? '正在找…' : '重新检测本机的库'),
+        vaultError !== ''
+          ? h('div', { className: 'dr-form-error', role: 'alert' }, vaultError)
+          : null,
+      ),
+      // 子目录：默认 dsh-reading，改错会写到库根，所以只允许一层名字。
+      h('div', { className: 'dr-field' },
+        h('div', { className: 'dr-field-label' }, '子文件夹'),
+        h('div', { className: 'dr-field-row' },
+          h('input', {
+            type: 'text',
+            className: 'dr-input',
+            value: vaultSubdir,
+            'aria-label': '笔记子文件夹',
+            onChange: (event) => change({ obsidianSubdir: event.target.value }),
+          })),
+        h('div', { className: 'dr-field-hint' }, '只写这个名字底下的文件，库的其它地方不碰。'),
+      ),
+      // 两个开关：自动写回决定「问完 AI 要不要顺手落笔记」，备份决定「覆盖前留不留底」。
+      h('div', { className: 'dr-field' },
+        h('div', { className: 'dr-field-label' }, '问完自动写回'),
+        h('div', { className: 'dr-field-row' },
+          h('button', {
+            type: 'button',
+            className: 'dr-chip' + (vaultAutoWrite ? ' is-on' : ''),
+            'aria-pressed': vaultAutoWrite ? 'true' : 'false',
+            onClick: () => change({ obsidianAutoWrite: true }),
+          }, '开'),
+          h('button', {
+            type: 'button',
+            className: 'dr-chip' + (vaultAutoWrite ? '' : ' is-on'),
+            'aria-pressed': vaultAutoWrite ? 'false' : 'true',
+            onClick: () => change({ obsidianAutoWrite: false }),
+          }, '关')),
+        h('div', { className: 'dr-field-hint' }, '开着时，每次问完 AI 会顺手把这次讨论写进对应那一章。'),
+      ),
+      h('div', { className: 'dr-field' },
+        h('div', { className: 'dr-field-label' }, '同步前备份'),
+        h('div', { className: 'dr-field-row' },
+          h('button', {
+            type: 'button',
+            className: 'dr-chip' + (vaultBackup ? ' is-on' : ''),
+            'aria-pressed': vaultBackup ? 'true' : 'false',
+            onClick: () => change({ obsidianBackup: true }),
+          }, '留底'),
+          h('button', {
+            type: 'button',
+            className: 'dr-chip' + (vaultBackup ? '' : ' is-on'),
+            'aria-pressed': vaultBackup ? 'false' : 'true',
+            onClick: () => change({ obsidianBackup: false }),
+          }, '不留')),
+        h('div', { className: 'dr-field-hint' }, '覆盖已有笔记前，把旧文件存进子文件夹的 .history 里（留 20 份）。'),
       ),
       props.error
         ? h('div', { className: 'dr-drawer-error', role: 'alert' }, props.error)
@@ -625,6 +786,236 @@ function useDistill({ active, bookHash }) {
   return { data, loading, error, busyHref, notice, load, runChapter, runSkeleton, runExport, runClear }
 }
 
+/**
+ * 读书笔记（0.13.0）：这本书在 Obsidian 里写成什么样了。
+ *
+ * 和 useDistill 一样「打开侧栏才取」——status 每次都要读两个文件的磁盘状态，
+ * 常驻轮询是白花钱。同步只有两个按钮：全部写入、只更新地图。
+ * 这里刻意不做「自动同步」——写别人的笔记库，得用户自己按下那个键。
+ */
+function useNotes({ active, bookHash }) {
+  const [status, setStatus] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState('')
+  const [notice, setNotice] = useState('')
+  const [preview, setPreview] = useState(null)
+  // 「我写过什么」（P6）：只读 vault 里这本书文件夹的标题，失败就整张卡不出现
+  const [mine, setMine] = useState(null)
+  const [profile, setProfile] = useState(null)
+  const [profileBusy, setProfileBusy] = useState(false)
+  const [relations, setRelations] = useState(null)
+  const [relationsBusy, setRelationsBusy] = useState(false)
+  const [relationsNotice, setRelationsNotice] = useState('')
+  const [threads, setThreads] = useState(null)
+  const [threadBusy, setThreadBusy] = useState('')
+  const [threadNotice, setThreadNotice] = useState('')
+
+  const load = useCallback(async () => {
+    if (typeof bookHash !== 'string' || bookHash === '') return
+    setLoading(true)
+    setError('')
+    try {
+      setStatus(await notesStatus(bookHash))
+    } catch (failure) {
+      setError(humanizeError(failure))
+    } finally {
+      setLoading(false)
+    }
+  }, [bookHash])
+
+  /**
+   * 画像单独读、单独失败。
+   *
+   * 它和笔记状态捆在同一个 try 里是不行的：画像算不出来只是「这次按通用口径写」，
+   * 不该让整个笔记面板变成一条红字。所以这里 catch 住只把画像置空。
+   */
+  const loadProfile = useCallback(async () => {
+    if (typeof bookHash !== 'string' || bookHash === '') return
+    try {
+      setProfile(await profileGet(bookHash))
+    } catch (failure) {
+      setProfile(null)
+    }
+  }, [bookHash])
+
+  /**
+   * 「我写过什么」单独读、单独失败。
+   *
+   * 它比画像更「不该拖累别人」：库没连、文件夹不存在、外接盘没插都是常态，
+   * 任何一种都只让这张卡不出现，不影响上面那几张。
+   */
+  const loadMine = useCallback(async () => {
+    if (typeof bookHash !== 'string' || bookHash === '') return
+    try {
+      setMine(await notesMine(bookHash))
+    } catch (failure) {
+      setMine(null)
+    }
+  }, [bookHash])
+
+  const rebuildProfile = useCallback(async () => {
+    setProfileBusy(true)
+    try {
+      setProfile(await profileRebuild(bookHash))
+    } catch (failure) {
+      setError(humanizeError(failure))
+    } finally {
+      setProfileBusy(false)
+    }
+  }, [bookHash])
+
+  const runSync = useCallback(async (kinds) => {
+    const list = Array.isArray(kinds) ? kinds.filter((kind) => typeof kind === 'string' && kind !== '') : []
+    setBusy(list.length === 1 ? list[0] : 'all')
+    setError('')
+    setNotice('')
+    try {
+      const result = await notesSync(bookHash, list)
+      const written = Number.isFinite(result && result.written) ? result.written : 0
+      setNotice(written === 0 ? '已经是最新的，没有要写的。' : '写了 ' + written + ' 个块。')
+    } catch (failure) {
+      setError(humanizeError(failure))
+    } finally {
+      setBusy('')
+      await load()
+    }
+  }, [bookHash, load])
+
+  const runPreview = useCallback(async (kind) => {
+    setError('')
+    try {
+      setPreview(await notesPreview(bookHash, typeof kind === 'string' && kind !== '' ? kind : 'note'))
+    } catch (failure) {
+      setError(humanizeError(failure))
+    }
+  }, [bookHash])
+
+  /**
+   * 人物关系与跨书主题（0.13.0 P5）。
+   *
+   * 两个都单独读、单独失败：抽不了关系只是「这张卡空着」，
+   * 不该把整个笔记面板变红。跨书主题要扫全部书的问答，最慢，也最不该拖累别人。
+   */
+  const loadRelations = useCallback(async () => {
+    if (typeof bookHash !== 'string' || bookHash === '') return
+    try {
+      setRelations(await relationsGet(bookHash))
+    } catch (failure) {
+      setRelations(null)
+    }
+  }, [bookHash])
+
+  const runRelationsBuild = useCallback(async () => {
+    setRelationsBusy(true)
+    setRelationsNotice('')
+    setError('')
+    try {
+      const result = await relationsBuild(bookHash)
+      setRelationsNotice(relationsBatchNotice(result) || '这一批抽完了。')
+      setRelations(await relationsGet(bookHash))
+    } catch (failure) {
+      setError(humanizeError(failure))
+      setRelations(await relationsGet(bookHash).catch(() => null))
+    } finally {
+      setRelationsBusy(false)
+    }
+  }, [bookHash])
+
+  const runRelationsClear = useCallback(async () => {
+    setRelationsBusy(true)
+    setRelationsNotice('')
+    setError('')
+    try {
+      await relationsClear(bookHash)
+      setRelations(await relationsGet(bookHash))
+      setNotice('人物关系已经清空，下次从第一批重新抽。')
+    } catch (failure) {
+      setError(humanizeError(failure))
+    } finally {
+      setRelationsBusy(false)
+    }
+  }, [bookHash])
+
+  const loadThreads = useCallback(async () => {
+    if (typeof bookHash !== 'string' || bookHash === '') return
+    try {
+      setThreads(await threadList())
+    } catch (failure) {
+      setThreads(null)
+    }
+  }, [bookHash])
+
+  const runThreadBuild = useCallback(async (term) => {
+    if (typeof term !== 'string' || term === '') return
+    setThreadBusy(term)
+    setThreadNotice('')
+    setError('')
+    try {
+      const result = await threadBuild(term)
+      setThreadNotice('「' + result.term + '」那一页写好了，共 ' + result.bookCount + ' 本书、' + result.blockCount + ' 段讨论。')
+      setThreads(await threadList())
+    } catch (failure) {
+      setError(humanizeError(failure))
+    } finally {
+      setThreadBusy('')
+    }
+  }, [])
+
+  const openIndex = useCallback(() => {
+    const indexRelPath = threads && typeof threads.indexRelPath === 'string' ? threads.indexRelPath : ''
+    const url = status && indexRelPath !== '' ? obsidianUrl(status.vault, indexRelPath) : ''
+    if (url !== '') window.open(url, '_self')
+  }, [status, threads])
+
+  const openFile = useCallback((kind) => {
+    const items = status && Array.isArray(status.items) ? status.items : []
+    const item = items.find((entry) => entry && entry.kind === kind)
+    const url = item && status ? obsidianUrl(status.vault, item.relPath) : ''
+    if (url !== '') window.open(url, '_self')
+  }, [status])
+
+  useEffect(() => {
+    if (active) {
+      load()
+      loadProfile()
+      loadMine()
+      loadRelations()
+      loadThreads()
+    }
+  }, [active, load, loadProfile, loadMine, loadRelations, loadThreads])
+
+  return {
+    status,
+    loading,
+    error,
+    busy,
+    notice,
+    preview,
+    mine,
+    loadMine,
+    profile,
+    profileBusy,
+    relations,
+    relationsBusy,
+    relationsNotice,
+    threads,
+    threadBusy,
+    threadNotice,
+    load,
+    runSync,
+    runPreview,
+    openFile,
+    rebuildProfile,
+    runRelationsBuild,
+    runRelationsClear,
+    runThreadBuild,
+    loadThreads,
+    openIndex,
+    clearPreview: () => setPreview(null),
+  }
+}
+
 function ReaderScreen(props) {
   const [frameDoc, setFrameDoc] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -659,6 +1050,17 @@ function ReaderScreen(props) {
   const [askError, setAskError] = useState('')
   // 同一次问答的多轮上下文：每成功一问 push 一轮，追问不再把上一轮顶掉
   const [askTurns, setAskTurns] = useState([])
+  // 这一条问答有没有顺手写进 Obsidian（宿主在 qa.ask 返回里带 obsidian）。
+  // null＝没问过 / 还没回来；对象＝宿主说了什么，文案由 notes.js 的 autowriteText 决定
+  const [askObsidian, setAskObsidian] = useState(null)
+  // 问 AI 的模式预设 id。初值取用户上次选的（settings.aiAskPreset），空串＝没选过，
+  // 由后端退回 general；打开面板不重置，用户选过就一直是他选的那个。
+  const [askMode, setAskMode] = useState(() => (
+    props.settings && typeof props.settings.aiAskPreset === 'string' ? props.settings.aiAskPreset : ''
+  ))
+  // 模式清单从后端拉（文案可能改，前端不硬编）。null＝还没拉到；
+  // 拉失败就给一项「一般问答」，下拉照常可用，绝不白屏。
+  const [askPresets, setAskPresets] = useState(null)
   // 一句中文提示（链接打不开 / 已复制 / 删除可撤销），无操作 2.4 秒消失，带操作 5 秒
   const [toast, setToast] = useState('')
   const [toastAction, setToastAction] = useState(null)
@@ -679,6 +1081,41 @@ function ReaderScreen(props) {
     }
   }, [])
 
+  // 问 AI 的模式清单：整个阅读器生命周期里拉一次。
+  // 文案归后端管（可能改），前端只认 id/name。拉不到就退回一项「一般问答」，
+  // 下拉照常出现但不会误导——提问时后端本来就会退回 general。
+  // 这里**不动 askMode**：空串是「没选过」的合法状态，显示哪一项由选择器自己
+  // 退回第一项，发出去时后端按 general 处理。
+  useEffect(() => {
+    let alive = true
+    const settle = (list) => {
+      if (!alive) return
+      setAskPresets(list)
+    }
+    call('ask.presets')
+      .then((value) => {
+        const list = Array.isArray(value)
+          ? value.filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+          : []
+        settle(list.length > 0 ? list : [{ id: '', name: '一般问答' }])
+      })
+      .catch(() => settle([{ id: '', name: '一般问答' }]))
+    return () => {
+      alive = false
+    }
+  }, [props.bookHash])
+
+  // settings 里的 aiAskPreset 才是真值：书的设置是打开时才读完的，ReaderScreen
+  // 挂载那一瞬 props.settings 可能还是空的，所以拉到之后要跟上。空串＝没选过，
+  // 不用处理——选择器自己把空的显示成第一项（general），后端也按 general 走。
+  useEffect(() => {
+    const saved = props.settings && typeof props.settings.aiAskPreset === 'string'
+      ? props.settings.aiAskPreset
+      : ''
+    if (saved === '') return
+    setAskMode((prev) => (prev === saved ? prev : saved))
+  }, [props.settings])
+
   const annotations = useAnnotations({
     bookHash: props.bookHash,
     frameDoc,
@@ -693,6 +1130,8 @@ function ReaderScreen(props) {
   const aiCenter = useAiCenter({ active: props.sideKind === 'ai' })
   // 读书蒸馏：一章一次调用，进度落在宿主侧（distill.json）
   const distill = useDistill({ active: props.sideKind === 'distill', bookHash: props.bookHash })
+  // 读书笔记：写进 Obsidian 库，同样打开侧栏才取
+  const notes = useNotes({ active: props.sideKind === 'companion', bookHash: props.bookHash })
 
   // 书内搜索（0.6.0）：真正的扫描在宿主侧（client/src/api.js 的 searchBook），
   // 面板只负责把命中列表画出来。这里用序号防止「搜了 A、又搜了 B，A 的结果慢到
@@ -1016,6 +1455,7 @@ function ReaderScreen(props) {
     })
     setAskQuestion('')
     setAskAnswer('')
+    setAskObsidian(null)
     setAskError('')
     setAskTurns([])
     setActiveAnn(null)
@@ -1100,6 +1540,7 @@ function ReaderScreen(props) {
     const restored = draft && draft.question.trim() !== '' ? draft.question : ''
     setAskQuestion(restored)
     setAskAnswer('')
+    setAskObsidian(null)
     setAskError(restored === '' ? '' : '上次那条没发出去，问题已经填回来了，可以直接再试一次。')
     setAskTurns([])
     setSelection(null)
@@ -1128,12 +1569,16 @@ function ReaderScreen(props) {
         author: props.meta && props.meta.author ? props.meta.author : '',
         // 当前工作内容：选区所在段落的前后文（0.8.0）
         surroundingText: askAnchor.surroundingText || '',
+        // 问 AI 的模式预设（0.11.0）。空串＝没选过，后端按 general 处理
+        mode: askMode,
       }
       // 发之前先把这次请求落在本机：失败时用户不必重述，重试就是「同一份再发一次」
       rememberAskDraft(props.bookHash, payload)
       const value = await call('qa.ask', payload)
       const answer = value && typeof value.answer === 'string' ? value.answer : ''
       setAskAnswer(answer)
+      // 宿主在问答成功后已经自己归位了一次（L0）；成没成、动了几块，都在这
+      setAskObsidian(value && value.obsidian && typeof value.obsidian === 'object' ? value.obsidian : null)
       // 追问逐轮累积：上一轮回答留在面板里，AI 侧记录也已落进 qa.jsonl
       setAskTurns((prev) => (answer === '' ? prev : [...prev, { question, answer }]))
       setAskQuestion('')
@@ -1146,7 +1591,7 @@ function ReaderScreen(props) {
     } finally {
       setAsking(false)
     }
-  }, [askAnchor, askQuestion, props.bookHash, props.meta, qaHistory])
+  }, [askAnchor, askQuestion, askMode, props.bookHash, props.meta, qaHistory])
 
   /** 「继续追问」：清掉输入框、保留上面的轮次，聚焦回输入框。 */
   const onNewQuestion = useCallback(() => {
@@ -1350,7 +1795,48 @@ function ReaderScreen(props) {
                   },
                 }),
               )
-              : null
+              : props.sideKind === 'companion'
+                ? h(NotesPanel, {
+                  status: notes.status,
+                  loading: notes.loading,
+                  error: notes.error,
+                  busy: notes.busy,
+                  notice: notes.notice,
+                  preview: notes.preview,
+                  mine: notes.mine,
+                  onMineReload: notes.loadMine,
+                  profile: notes.profile,
+                  profileBusy: notes.profileBusy,
+                  onProfileRebuild: notes.rebuildProfile,
+                  // 关掉个性化是「立刻生效、立刻落盘」的一次性动作，和问法偏好同一条路：
+                  // 走 patchSettings 的去抖会让卡片消失得比设置生效慢半拍。
+                  onProfileOff: () => {
+                    const next = { ...settingsRef.current, readerProfile: false }
+                    settingsRef.current = next
+                    if (typeof props.onPatchSettings === 'function') props.onPatchSettings(next)
+                    call('settings.put', { readerProfile: false }).catch(() => {
+                      // 记不住偏好不算错：这一次的界面已经按关掉处理了
+                    })
+                  },
+                  relations: notes.relations,
+                  threads: notes.threads,
+                  relationsBusy: notes.relationsBusy,
+                  relationsNotice: notes.relationsNotice,
+                  threadBusy: notes.threadBusy,
+                  threadNotice: notes.threadNotice,
+                  onRelationsBuild: notes.runRelationsBuild,
+                  onRelationsClear: notes.runRelationsClear,
+                  onThreadBuild: notes.runThreadBuild,
+                  onThreadReload: notes.loadThreads,
+                  onOpenIndex: notes.openIndex,
+                  onSync: notes.runSync,
+                  onPreview: notes.runPreview,
+                  onClosePreview: notes.clearPreview,
+                  onOpen: notes.openFile,
+                  onOpenSettings: () => setSettingsOpen(true),
+                  onReload: notes.load,
+                })
+                : null
 
   /**
    * 改设置：立刻生效（父组件 state 更新 → reader 重排），500ms 后落盘。
@@ -1385,6 +1871,25 @@ function ReaderScreen(props) {
     if (settingsSaveTimer.current !== null) clearTimeout(settingsSaveTimer.current)
   }, [])
 
+  /**
+   * 换「问 AI」的模式预设：先落界面，再把选择记进 settings。
+   *
+   * 为什么不走 patchSettings：那条路 500ms 去抖只发最后一次 patch，用户改完字号
+   * 立刻换模式时，前一次改动会被吞掉。模式是一次点击一个值，直接落盘更准；
+   * 写失败只吞掉——记不住偏好不该打断提问。
+   */
+  const onAskModeChange = useCallback((mode) => {
+    const next = typeof mode === 'string' ? mode : ''
+    setAskMode(next)
+    settingsRef.current = { ...settingsRef.current, aiAskPreset: next }
+    if (typeof props.onPatchSettings === 'function') {
+      props.onPatchSettings({ ...settingsRef.current, aiAskPreset: next })
+    }
+    call('settings.put', { aiAskPreset: next }).catch(() => {
+      // 记不住偏好不算错：这次提问照样按选中的模式发
+    })
+  }, [props.onPatchSettings])
+
   // 第一次进阅读器自动弹一次说明；之后只在用户点「?」时打开
   useEffect(() => {
     try {
@@ -1397,11 +1902,46 @@ function ReaderScreen(props) {
     }
   }, [])
 
+  // 老书第一次打开也要有机会选版式：导入时的询问只覆盖新导入，
+  // 已经躺在书架里的 PDF 打开时没有任何提示，用户就会以为功能没做。
+  const paperHint = props.meta && props.meta.format === 'pdf-converted' ? props.meta.pdfPaperHint : null
+  const askLayout = paperHint && paperHint.looksLikePaper === true
+    && props.meta.pdfLayoutByUser !== true
+
   return h(
     'div',
     { className: 'dr-root', ref: viewportWrapRef },
     annError && !annotations.loading
       ? h('div', { className: 'dr-error-box', role: 'alert', style: { margin: '8px 12px 0' } }, annError)
+      : null,
+    askLayout
+      ? h(
+        'div',
+        { className: 'dr-paper-banner', role: 'status' },
+        h(
+          'span',
+          { className: 'dr-paper-banner-text' },
+          `这本看起来是论文（${paperHint.reason || '开头有摘要或关键词'}）。要按论文排版吗？`,
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-btn dr-btn-sm dr-btn-primary',
+            onClick: () => props.onChooseLayout && props.onChooseLayout('paper'),
+          },
+          '按论文排版',
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dr-btn dr-btn-sm',
+            onClick: () => props.onChooseLayout && props.onChooseLayout('book'),
+          },
+          '不用，保持书本',
+        ),
+      )
       : null,
     h(ReaderView, {
       bookHash: props.bookHash,
@@ -1431,11 +1971,8 @@ function ReaderScreen(props) {
       onOpenAi: () => {
         if (typeof props.onToggleSide === 'function') props.onToggleSide('ai')
       },
-      // 读书蒸馏入口（0.8.0）
-      distillDone: distillSummary(distill.data).done,
-      onOpenDistill: () => {
-        if (typeof props.onToggleSide === 'function') props.onToggleSide('distill')
-      },
+      // 读书蒸馏入口已经搬到书架（0.10.1）：阅读器工具栏不再有蒸馏按钮，
+      // 这里也就不再传 distillDone / onOpenDistill。侧栏仍由 sideKind='distill' 打开。
       // 正文点击 / Esc 收起浮层（reader 判断完白名单与拖选后回调）
       closeMenus: closeOverlays,
       // 书内链接跨章跳转与一句中文提示
@@ -1544,8 +2081,13 @@ function ReaderScreen(props) {
       answer: askAnswer,
       turns: askTurns,
       error: askError,
+      // 问 AI 的模式预设：清单来自后端 ask.presets，选中值来自 settings
+      mode: askMode,
+      onModeChange: onAskModeChange,
+      presets: askPresets,
       bookHash: props.bookHash,
-      metaText: askAnswer === '' ? '' : '已保存到这本书的问答里',
+      // 「已写进 Obsidian」优先说：定稿那句是常驻提示，写了笔记才是这一刻的结果
+      metaText: askAnswer === '' ? '' : (autowriteText(askObsidian) || '已保存到这本书的问答里'),
       // 这次调用随身携带了什么、现在 AI 通不通（0.8.0）
       surroundingChars: askAnchor && typeof askAnchor.surroundingText === 'string' ? askAnchor.surroundingText.length : 0,
       aiStatus: aiCenter.status,
@@ -1714,8 +2256,20 @@ export function PanelPage(props) {
       { className: 'dr-root' },
       h(ShelfView, {
         onOpen: openBook,
+        // 书架上的「读书蒸馏」：打开这本书，直接把侧栏切到蒸馏。
+        // 顺序不能反——先 openBook 才有 bookHash，useDistill 才会带对书去拉进度。
+        onDistill: (hash) => {
+          openBook(hash)
+          setSideKind('distill')
+        },
         onImported: (hash) => {
           openBook(hash)
+        },
+        // 书架角标「笔记 N」：打开这本书，直接把侧栏切到笔记页。
+        // 和 onDistill 一样，顺序不能反——先 openBook 才有 bookHash。
+        onNotes: (hash) => {
+          openBook(hash)
+          setSideKind('companion')
         },
       }),
     )
@@ -1777,6 +2331,18 @@ export function PanelPage(props) {
     onToggleSide: toggleSide,
     onProgress,
     onClose: closeBook,
+    // 阅读器里的版式横幅：选完就地重排并重开这本书（重排后章号页码全变，
+    // 不重开就是一本旧页对着新目录看）。
+    onChooseLayout: async (layout) => {
+      try {
+        await setBookLayout(bookHash, layout)
+      } catch (err) {
+        setError(humanizeError(err))
+        setScreen('reader')
+        return
+      }
+      openBook(bookHash)
+    },
   })
 }
 

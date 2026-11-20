@@ -5,10 +5,12 @@
 导入 **EPUB / MOBI / AZW3 / TXT / PDF**，分页读，做目录跳转，记住读到哪，划线、写笔记、加书签。
 **没有账号，没有服务器，没有遥测**：书和笔记都在你自己的磁盘上。
 
-> 状态：`0.9.7`，M1「能读书」+ M2「能划线」+ 搜索/标注交互 + 手机与多端 + AI 状态诊断与读书蒸馏 + 书源搜书，
+> 状态：`0.13.0`，M1「能读书」+ M2「能划线」+ 搜索/标注交互 + 手机与多端 + AI 状态诊断与读书蒸馏 + 书源搜书 + PDF 论文版式 + 问 AI 五模式与随包阅读 skill + 知网文献检索 + **AI 伴读与 Obsidian 知识库**，
 > 支持五种输入格式（EPUB / MOBI / AZW3 / TXT / PDF 文字版）。
-> 这一版加上：**Legado 书源的导入与搜书**（用自己的源，抓目录、按章取正文）、
-> 阅读设置按「文字 / 纸张 / 翻页」分组。插件不内置任何书源，也不带默认站点。
+> 这一版加上：**读完的书长成你 Obsidian 库里的一棵笔记树**——全书地图、按章的读书笔记、
+> 人物关系图，都用锚块协议写，你自己手写的东西一个字不动；**圈住一段话问完 AI，
+> 答案自动落回对应章节**，不用点保存；还会拿你「问过什么」算出读者画像，
+> 拿去调蒸馏与人物关系 prompt 的侧重。插件只往你选的库里写，只碰 `dsh-reading/` 一个子目录。
 > 跨端同步（WebDAV）**还没做**，见 [路线图](#路线图)。
 
 ---
@@ -74,14 +76,18 @@ dsh plugin --profile web remove dsh-reading
 
 ```
 <libraryDir>/
-├── settings.json                       # 阅读偏好：字号、行高、主题、栏宽
+├── settings.json                       # 阅读偏好：字号、行高、主题、栏宽，以及 Obsidian 那五个键
 └── books/
     └── <bookHash>/                     # sha256(epub 字节) 的前 16 位
         ├── book.epub                   # 原始文件
         ├── meta.json                   # 书名、作者、spine 表
         ├── progress.json               # 读到哪（CFI + 百分比）
         ├── annotations.jsonl           # 划线 / 笔记 / 书签，一行一条
-        ├── qa.jsonl                    # 给将来的 AI 问答留的位置（当前只读写结构）
+        ├── qa.jsonl                    # 圈住原文问 AI 的问与答
+        ├── distill.json                # 按章蒸馏的结果（0.8.0 起）
+        ├── relations.json              # 人物关系图（0.13.0 起，仅小说）
+        ├── reader-profile.json         # 读者画像（0.13.0 起，从 qa.jsonl 算出来）
+        ├── notes.json                  # 笔记同步台账（0.13.0 起，记每个块的 hash）
         ├── quarantine.jsonl            # 解不开的锚点，只写不读
         └── history/                    # 被覆盖前的旧文件，保留最近 20 份
 ```
@@ -93,6 +99,23 @@ dsh plugin --profile web remove dsh-reading
    那是你的数据，坏了也不该被悄悄扔掉。
 3. **删除是墓碑，不是删行。** `annotations.jsonl` 里被删的记录变成 `"deleted": true`，
    文件里那一行还在。这是将来做多设备合并的前提：没有墓碑，另一台设备会把它「复活」。
+
+0.13.0 的笔记**不存在这里**，它们写进你自己的 Obsidian 库：
+
+```
+<obsidianVault>/dsh-reading/                     # 只碰这一个子目录
+├── 《书名》 <短哈希>/                            # 短哈希 = sha256(bookHash) 前 10 位
+│   ├── 00 全书地图.md
+│   ├── 01 读书笔记.md
+│   ├── 02 人物关系.md
+│   └── 03 思想脉络.md
+├── _主题/                                       # 跨书主题，全局一份
+│   └── <主题>.md
+├── _索引/主题总览.md
+└── .history/                                    # 覆盖前留底，每份保留最近 20 版
+```
+
+笔记那块是 Markdown；书库那块才是插件自己的数据。两者可以分开备份、分开迁移。
 
 ---
 
@@ -110,6 +133,9 @@ dsh plugin --profile web remove dsh-reading
 
 改完同样要重启 DSH。
 
+只在 `cordis.patch.yml` 里能设的就这两项。其余都在界面上改（字数偏好、主题、字号、
+Obsidian 库位置、自动写回开关、读者画像开关），存进 `<libraryDir>/settings.json`。
+
 ---
 
 ## 它能做什么
@@ -123,8 +149,32 @@ dsh plugin --profile web remove dsh-reading
 左上角两级下拉可以筛书架：全部 / 我的珍藏 / 按系列 / 按作者 / 按分类 / 按标签。
 筛选是纯前端的，不动书的数据。细节见 [docs/13](docs/13-书籍信息与筛选.md)。
 
-「导入」面板分三段：从电脑选文件、粘贴一条下载直链、或者用你自己填的书源搜关键词。
-插件**不内置任何站点**，也不带默认书源——你填什么它抓什么，见 [docs/12](docs/12-找书与网络导入.md)。
+「导入」面板分四段：从电脑选文件、粘贴一条下载直链、用你自己填的书源搜关键词，
+或者**直接搜知网**。前两段与书源那段**不内置任何站点**——你填什么它抓什么，见 [docs/12](docs/12-找书与网络导入.md)。
+第四段反过来了：它内置知网那个老检索站，因为那一处不用登录就能拿到题录。
+
+书源面板里导入 JSON 有三条路：**贴链接**（最省事，服务端替你去下载，上限 32 MB、超时 180 秒）、
+把整包粘进文本框、或者选一个 `.json` 文件。整包书源常有一二十兆，粘贴那条路实际很难走完。
+
+**知网检索** — 不用账号、不用配东西，输入主题词就能搜中文文献。四种找法对应四种用途：
+
+| 下拉里写的 | 什么时候用 |
+|---|---|
+| 经典文献（被引最高） | 刚进一个领域，看公认的那几篇 |
+| 最新发表 | 追前沿，看这两年谁在写 |
+| 相关度 | 说不准怎么描述，先随便看看 |
+| 下载最多 | 想知道大家都在下什么 |
+
+每条结果给出标题、文献类型、作者、期刊年期、被引次数、下载次数和正文开头一段。
+关键词不进列表，存成文献集时才写进那一章。
+三个动作：新标签打开知网详情页（你自己登录去下 PDF）、复制题录、勾选。
+
+**勾几条点「存成文献集」，书架里就多一本真书**——能翻页、能划线、能圈一句问 AI。
+问的时候选「论文分析」模式，拿到的是四档判决那套格式。已经在书架里的会标「已在本地」，
+同一批题录存两次也只有一本书。
+
+它**只做检索，不做登录、不做下载**。能拿到什么、拿不到什么、为什么，
+以及那个「被引排序却搜出无关文章」的坑，都写在 [docs/25](docs/25-知网文献检索.md)。
 
 **格式** — 能读五种：
 
@@ -183,10 +233,58 @@ dsh plugin --profile web remove dsh-reading
 - 小说里会刻意不剧透后面的情节；
 - 这个功能走宿主自己的子代理机制，所以**你得先在 DSH 里选一个模型**。没选模型时它会告诉你「还没选模型」，而不是默默失败。
 
+**问之前先选怎么看这段话** — 面板顶部模型选择器旁边有个模式下拉，五个：
+
+| 模式 | 什么时候用 | 它给什么 |
+|---|---|---|
+| 一般问答 | 默认，问什么都行 | 直接回答，不绕 |
+| 名著精读 | 读小说、散文、戏剧 | 这句话在整本书里的位置、写法、语气，会引原句 |
+| 论文分析 | 读论文 | 分清作者声称、证据支持、你的推断、论文没覆盖 |
+| 概念溯源 | 碰到术语、典故 | 词从哪来、通行含义与这本书里的用法差在哪 |
+| 外文原著 | 读英日法等原文 | 关键句给原文加一种译法，术语中英对照 |
+
+选过一次会记住，下次打开还是那个模式。每个模式的人设进子代理的系统提示、回答要求进这次提问的正文，两处不重复。要加模式改 `lib/askpresets.js` 一处即可，细节见 [docs/24](docs/24-问AI模式与内置skill.md)。
+
+**它还带四个读书 skill**（连同原来的陪读教练一共五个）— 装好插件重启，聊天里就能用（前提是你的 DSH 装了 skill 工具，一般是有的）：
+
+| skill | 说这句话就载入 | 它干什么 |
+|---|---|---|
+| `reading-coach` | 「陪读」「带我读这本书」 | 一次只问一个问题，把你问明白，最后落一张卡片 |
+| `book-analysis` | 「分析这本书」「这本书好在哪」 | 先给四百字判读报告停下等确认，再按结构、人物、视角、语言、文学史位置拆，每维挂原句 |
+| `paper-reading` | 「读这篇论文」「值不值得读」 | 先给四档判决，再决定读多深，只精读承重单元 |
+| `literature-review` | 「做综述」「这几篇放一起比」 | 按概念分组，缺口分类，真矛盾与口径差异分开 |
+| `notes-to-article` | 「把读书笔记改成文章」 | 找一处能立住的判断，五段结构，引文守规矩 |
+
+五个 skill 的正文都在插件的 `skills/` 目录里，跟着包装走，不用另装。想改哪一条直接改那个 `SKILL.md`，重启生效。
+
 **问过的话找得回来** — 阅读视图工具栏有个「问答」入口，打开就是这本书的全部问答记录：
 按时间倒序列出你问过什么、它答了什么、问的是哪一段原文、在第几章。顶部有搜索框，
 点任意一条就跳回那段原文所在的位置，接着问也行（同一个锚点上续问，答案不会串）。
 记录存在这本书自己的 `qa.jsonl` 里，不上传。
+
+**读完的书长成一棵笔记树** — 这一版最大的新增。挑一个 Obsidian 库，插件往里面的
+`dsh-reading/` 写三样东西：全书地图、按章的读书笔记、人物关系图（只有小说才写）。
+
+它不是「导出一份 Markdown」——导一次就过期了。写的是**活的笔记**：
+
+- **你问完 AI，答案自己落进对应章节**，不用点保存。默认开，设置里可关；
+- **你自己手写的东西一个字不动**。每段插件内容包在一对 HTML 注释里（锚块），
+  同步只替换自己那一块；块里的字你改过，它就整块跳过并告诉你「有 1 段你改过，我没动」；
+  块被你删掉了，它记下来**永不复活**；
+- **人物关系是一条条从原文里抽的，每条都带原句**，抽完拿原句回去 `indexOf` 核对，
+  核不上的直接丢掉并报数——宁可比少几条，也不要凭空编两个人名；
+- **一个主题要在两本以上的书里都出现过才成页**（`_主题/<主题>.md`），
+  只出现一次的词多半是噪声；
+- **它会看你问过什么**。面板顶部一张画像卡：「你问过 12 个问题，集中在第 3、7 章，
+  反复在问『叙事视角』」——这句会注进蒸馏与人物关系的 prompt，让 AI 按你关心的侧重写。
+  画像只进结论不进原文，零 AI 也能算，不花钱。
+
+设置里四个开关（`obsidianVault` / `obsidianSubdir` / `obsidianAutoWrite` / `obsidianBackup`），
+另加一个 `readerProfile`。选库那一步会真写一次目录做可用性确认——只 `stat` 挡不住
+「目录在但只读」，那种要等到你写了半小时笔记才炸。
+
+设计稿与它没实现的三项（AI 提炼、`_索引/我的阅读.md`、跨书页注画像）在
+[docs/26](docs/26-AI伴读与Obsidian知识库.md)。
 
 
 ## 它凭什么可信
@@ -258,9 +356,21 @@ hash = sha256(文本 UTF-8 字节) 的小写 hex
 npm install --no-save --ignore-scripts jsdom@30 ajv@8   # 只在开发时需要
 
 node golden/run.mjs        # 锚点一致性向量（318 条，含 45 条畸形）
-node test/run.mjs          # 12 个测试文件：zip / xml / epub / store / routes / cfi /
-                           #   contract / schema_parity / client_build / client_apply /
-                           #   dom_immutability / e2e_local
+node test/run.mjs          # 45 组测试，按层从下往上跑：
+                           #   格式层 zip / xml / epub / txt / mobi / pdf / paper /
+                           #     papercollect / bookformat
+                           #   存储与路由 store / routes / source / cnki / legado
+                           #   界面纯函数 shelf_ui / cnki_ui / layout_css / frame_metrics /
+                           #     contrast / search / meta
+                           #   AI 与 skill coach_skill / skill_bundle / ask_presets /
+                           #     ai / aimodel / distill_ui
+                           #   Obsidian blocks / vault / notesync / notes_routes /
+                           #     notes_autowrite / profile / profile_routes /
+                           #     relations / threads
+                           #   锚点核心 cfi / contract / schema_parity
+                           #   客户端 client_build / client_apply / dom_immutability /
+                           #     menu_geometry / annotation_overlap
+                           #   端到端 e2e_local
 node client/build.mjs      # 从 client/src/*.mjs 生成 client.js
 node client/build.mjs --check   # 只校验 client.js 与源码同步（CI 用）
 npm run verify             # 以上全跑一遍
@@ -276,24 +386,70 @@ npm run verify             # 以上全跑一遍
 ### 目录
 
 ```
-index.js                 宿主入口：Config + apply + 一条 prefix 路由
+index.js                 宿主入口：Config + apply + 一条 prefix 路由 + 注册 skills/
 lib/                     宿主侧（Node，零运行时依赖）
-├── zip.js               ZIP 读取（node:zlib 的 inflateRawSync）
-├── xml.js               严格 XML 子集解析（不展开 DTD、不做外部实体）
-├── epub.js              EPUB → spine / toc / 章节 XHTML
-├── store.js             本地书库读写、墓碑、history 轮转
-├── routes.js            /api/dsh-reading/** 的分派（纯函数，可无端口测试）
-└── paths.js device.js errors.js
+├── 格式层
+│   ├── zip.js           ZIP 读取（node:zlib 的 inflateRawSync）
+│   ├── xml.js           严格 XML 子集解析（不展开 DTD、不做外部实体）
+│   ├── epub.js          EPUB → spine / toc / 章节 XHTML
+│   ├── mobi.js          MOBI / AZW3 → 同一份章节结构
+│   ├── txt.js           TXT 按编码与章节正则切
+│   ├── pdf.js           PDF 取文本层与页面尺寸
+│   ├── pdftext.js       PDF 文本重排（栏检测、行合并）
+│   ├── paper.js         PDF 论文版式识别
+│   ├── papercollect.js  题录 → 一本能读的文献集（造书）
+│   └── bookformat.js    「这是什么文件」的统一判定
+├── 存储与路由
+│   ├── store.js         本地书库读写、墓碑、history 轮转、设置
+│   ├── routes.js        /api/dsh-reading/** 的分派（纯函数，可无端口测试）
+│   ├── paths.js         书库路径与分片目录
+│   ├── device.js        设备标识
+│   └── errors.js        AppError 与错误码
+├── 书源与网络
+│   ├── textbook.js      教材版式辅助（章节标题与习题段的识别）
+│   ├── sources.js       检索模板拼接、候选抽取、文件名猜测（纯函数）
+│   ├── legado.js        Legado 书源规则解释与搜书
+│   └── cnki.js          知网 HTML → 题录（纯函数 + 可注入 fetch）
+├── AI 通道
+│   ├── ask.js           圈一段话问 AI：prompt 拼装与落盘
+│   ├── askpresets.js    五个问答模式（人设 + 回答要求）
+│   ├── aicall.js        子代理调用的唯一出口
+│   ├── aimodel.js       模型列表与选择状态的读取
+│   ├── aistatus.js      「AI 能不能用」的诊断
+│   ├── distill.js       按章蒸馏：prompt、原句回核、成 Markdown
+│   └── skillbundle.js   扫 skills/ 逐个注册（单个坏掉只 warn）
+├── Obsidian 笔记（0.13.0）
+│   ├── blocks.js        锚块协议的解析与渲染（纯函数）
+│   ├── vault.js         库发现、路径校验、原子写、备份轮转
+│   ├── notesync.js      计划与落地：哪个文件哪一块该是什么
+│   ├── mynotes.js       只读标题的「我写过什么」
+│   ├── profile.js       读者画像统计（纯函数）
+│   ├── relations.js     人物关系分批抽取 + 原句回核
+│   └── threads.js       跨书主题的候选筛选与成页
+└── coachskill.js        陪读教练 skill 的注册（由 skillbundle 统一调用）
 client/
 ├── build.mjs            构期拼接（无打包器）：src/*.mjs → client.js
 ├── vendor/              foliate-js/epubcfi.js 原样副本（MIT，锁版本）
-└── src/
+└── src/                 18 个模块
     ├── cfi.js           ★ 锚点核心，唯一允许碰 vendor 的文件
     ├── contract.js      记录构造 / 字段校验 / 指纹
     ├── sha256.js        纯 JS sha256（同步）
     ├── reader.js        iframe 分页阅读器
+    ├── reader-metrics.js 版心尺寸与分页容量估算（纯函数）
     ├── annotate.js      覆盖层 + 选区菜单 + 标注侧栏
-    └── shelf.js toc.js style.js api.js app.js
+    ├── search.js        书内搜索
+    ├── toc.js           目录树
+    ├── shelf.js         书架与书卡
+    ├── cnki.js          知网检索面板
+    ├── legado-ui.js     书源面板
+    ├── ai.js            AI 面板
+    ├── distill.js       蒸馏面板
+    ├── notes.js         读书笔记面板（0.13.0）
+    ├── style.js         全部 CSS（按版本分段常量）
+    ├── style-qa.js      问答面板样式
+    ├── api.js           宿主路由的客户端封装
+    └── app.js           应用外壳与两个屏
+skills/                  随包分发的五个 skill（各自一个 SKILL.md）
 golden/                  一致性向量与 fixture 生成器
 schema/contract.schema.json   机器可校验的字段契约
 ```
@@ -321,9 +477,9 @@ node golden/run.mjs              # 跑全部向量
 
 ### 测试与 CI
 
-`node test/run.mjs` 跑 15 个测试文件。仓库本身**零运行时依赖**，
-所以只 clone 不装包也能跑通其中 12 个；依赖 `jsdom` / `ajv` 的 3 个（`cfi`、
-`schema_parity`、`dom_immutability`）会自动记为 SKIP 而不是 FAIL ——
+`node test/run.mjs` 跑 45 组测试。仓库本身**零运行时依赖**，
+所以只 clone 不装包也能跑通其中 42 组；依赖 `jsdom` / `ajv` 的 3 组（`cfi`、
+`annotation_overlap`、`schema_parity`）会自动记为 SKIP 而不是 FAIL ——
 装了开发依赖就全跑，CI 里是全跑的（`.github/workflows/ci.yml`，Node 22 与 24 双版本）。
 
 `npm run verify` = `node --check index.js` + 产物同步校验 + 一致性向量 + 全部单测。
@@ -351,7 +507,13 @@ node golden/run.mjs              # 跑全部向量
 | [`docs/17`](docs/17-书源与Legado兼容.md) | 书源规则支持到什么程度、字段怎么用、一次搜索发生什么 |
 | [`docs/18`](docs/18-多端打包规划.md) | 手机 APK 与桌面安装包怎么打、先打哪个、坑在哪 |
 | [`docs/19`](docs/19-独立多端App方案.md) | 做成 Legado 那样独立 App 的路线、工期与代价 |
+| [`docs/23`](docs/23-外部阅读器桥.md) | 外部阅读器桥：Zotero / KOReader / Calibre / Obsidian 怎么连 |
+| [`docs/22`](docs/22-插图公式与扫描件.md) | 插图 / 公式 / 扫描件：认不出的自动截成图片，分三期做 |
+| [`docs/21`](docs/21-论文版式.md) | PDF 论文版式：为什么让用户选、线索字段、两种排版差异 |
 | [`docs/20`](docs/20-陪读教练skill.md) | 随插件带的陪读教练 skill：七步流程、取正文的三种来源、怎么改 |
+| [`docs/24`](docs/24-问AI模式与内置skill.md) | 问 AI 的五个模式与随包带的四个阅读 skill：怎么选、怎么加、为什么不做成 agent preset |
+| [`docs/25`](docs/25-知网文献检索.md) | 知网检索：不用登录能拿到什么、拿不到什么、四种找法、文献集怎么做 |
+| [`docs/26`](docs/26-AI伴读与Obsidian知识库.md) | AI 伴读 + Obsidian 知识库：四类笔记、锚块协议、问完自动写回、按「问过什么」个性化（**0.13.0 已实现**，与设计稿的差异见文末「没做的三项」） |
 
 ---
 
@@ -359,13 +521,16 @@ node golden/run.mjs              # 跑全部向量
 
 | 里程碑 | 内容 | 状态 |
 |---|---|---|
-| M1 能读 | 导入、书架、分页、目录、进度 | ✅ 本轮 |
-| M2 能记 | 五色高亮、笔记、书签、覆盖层 | ✅ 本轮 |
-| M3 能同步 | WebDAV 四步探测、逐记录合并、history 轮转 | 未开始 |
-| M4 能问 | 按 `cutoffCfi` 硬截断的 AI 问答（防剧透） | 未开始 |
-| M5 能跨端 | 手机端阅读器，跑同一批向量 | 未开始 |
+| M1 能读 | 导入、书架、分页、目录、进度 | ✅ |
+| M2 能记 | 五色高亮、笔记、书签、覆盖层 | ✅ |
+| M3 能找 | 书源搜书、粘贴直链、知网检索存文献集 | ✅ |
+| M4 能问 | 圈一段话问 AI（防剧透）、五个模式、问答记录 | ✅ |
+| M5 能蒸 | 逐章蒸馏 + 全书骨架 + 导出 Markdown | ✅ |
+| M6 能进库 | Obsidian 笔记树、锚块协议、问完自动写回、读者画像、人物关系、跨书主题 | ✅ 0.13.0 |
+| M7 能同步 | WebDAV 四步探测、逐记录合并、history 轮转 | 未开始 |
+| M8 能跨端 | 手机端阅读器与多端打包 | 部分（窄屏样式已通，打包见 [docs/18](docs/18-多端打包规划.md)） |
 
-M3 起才有多设备。在那之前数据只在本机，**请自己备份 `~/.dsh-reading/`**。
+M7 起才有多设备。在那之前数据只在本机，**请自己备份 `~/.dsh-reading/` 与你的 `dsh-reading/` 笔记目录**。
 
 ---
 
@@ -379,7 +544,7 @@ M3 起才有多设备。在那之前数据只在本机，**请自己备份 `~/.d
 - **MOBI 的复杂排版**（FDST / skeleton）没有还原，个别书段落顺序可能不完美。
 - **加密 EPUB（DRM）不能打开**，会明确报错而不是白屏。
 - **竖排 / RTL 文本**能读，但跨页选区的高亮矩形会降级成整段高亮。
-- **没有全文搜索**，没有 TTS，没有阅读统计。
+- **没有 TTS，没有阅读时长统计。**（书内搜索 0.6.0 起就有，顶部「⌕ 搜索」）
 - **单用户**：没有账号概念，也就不存在共享书库。
 
 ---

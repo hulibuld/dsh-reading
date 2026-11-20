@@ -217,6 +217,7 @@ export default async function run() {
       assert.equal(shelf.books[0].author, '某作者')
       assert.equal(shelf.books[0].percent, 0)
       assert.equal(shelf.books[0].coverUrl, null, '没有封面时 coverUrl 必须是 null')
+      assert.equal(shelf.books[0].notesCount, 0, '没同步过笔记时角标数必须是 0')
 
       // 书不存在
       await expectCode('E_BOOK_NOT_FOUND', () => store.readMeta('0'.repeat(16)))
@@ -668,10 +669,33 @@ export default async function run() {
     assert.ok(compareVersion(c, a) > 0, '时间相同看 deviceId 字典序')
     assert.ok(compareVersion({}, {}) === 0)
 
-    // mergeSettings 只认五个键
+    // mergeSettings 只认白名单里的键（0.11.0 起是十个），别的键连影子都不留
     const settings = mergeSettings(DEFAULT_SETTINGS, { fontSize: 20, unknownKey: 'x' })
     assert.equal(settings.fontSize, 20)
     assert.equal('unknownKey' in settings, false)
+
+    // aiAskPreset（0.11.0）：「问 AI」上次选的那个模式。
+    // 默认空串 = 一般问答；空串合法（用户从没选过）；超长直接拒，不截断也不静默丢。
+    assert.equal(DEFAULT_SETTINGS.aiAskPreset, '')
+    assert.equal(mergeSettings(DEFAULT_SETTINGS, {}).aiAskPreset, '')
+    assert.equal(mergeSettings(DEFAULT_SETTINGS, { aiAskPreset: '' }).aiAskPreset, '')
+    assert.equal(mergeSettings(DEFAULT_SETTINGS, { aiAskPreset: 'paper' }).aiAskPreset, 'paper')
+    assert.equal(
+      mergeSettings(DEFAULT_SETTINGS, { aiAskPreset: 'a'.repeat(32) }).aiAskPreset.length,
+      32,
+      '32 字正好到上限，要收',
+    )
+    assert.throws(
+      () => mergeSettings(DEFAULT_SETTINGS, { aiAskPreset: 'a'.repeat(33) }, { strict: true }),
+      (error) => error && error.code === 'E_BAD_SETTINGS',
+      '33 字要拒（strict 模式下抛 E_BAD_SETTINGS）',
+    )
+    // 非 strict 时不抛，只是不写进去——用户没让你保存成功，就别假装成功
+    assert.equal(
+      mergeSettings(DEFAULT_SETTINGS, { aiAskPreset: 'a'.repeat(33) }).aiAskPreset,
+      '',
+      '超长的值不该被悄悄写进来',
+    )
 
     // validateRecord 保留多余字段（客户端将来加字段不用改宿主）
     const validated = validateRecord(makeHighlight({ extraField: 'keep-me' }))
@@ -898,6 +922,7 @@ export default async function run() {
         anchorCfiRange: 'epubcfi(/6/2!/4/2,/1:0,/1:5)',
         chapterHref: 'text/ch1.xhtml',
         chapterLabel: '第一章',
+        mode: 'paper',
       })
       const listed = await store.listQa(dirName)
       const record = listed.records.find((item) => item.id === entry.id)
@@ -915,6 +940,7 @@ export default async function run() {
         'anchorXpath',
         'selectedText',
         'model',
+        'mode',
         'createdAt',
         'updatedAt',
       ]) {
@@ -922,6 +948,15 @@ export default async function run() {
       }
       assert.equal(record.book, dirName, '没有 book 字段时用书目录名兜底')
       assert.equal(record.chapterLabel, '第一章')
+      assert.equal(record.mode, 'paper', '这次提问用的模式要落盘（0.11.0 附加字段）')
+      // 异常长的 mode（手改出来的）截到 32 字，与账本同口径，不要去动 schema
+      const longMode = await store.appendQa(dirName, {
+        question: '超长模式',
+        answer: '也该存下来',
+        anchorCfiRange: 'epubcfi(/6/2!/4/2,/1:0,/1:3)',
+        mode: 'x'.repeat(40),
+      })
+      assert.equal(longMode.mode.length, 32, 'mode 超过 32 字要截断，与账本同口径')
       assert.equal(record.cutoffCfi, '', '缺的字段补空串，不能是 undefined')
 
       // 旧库：只有 question/answer/anchorCfiRange 的行也要能读（缺字段不炸）
@@ -937,6 +972,7 @@ export default async function run() {
       assert.ok(legacy, '旧记录必须能被读出来')
       assert.equal(legacy.chapterHref, '')
       assert.equal(legacy.model, '')
+      assert.equal(legacy.mode, '', '老记录没有 mode 键，读作空串而不是 undefined')
       assert.equal(legacy.createdAt, '')
       assert.equal(legacy.book, dirName)
 
@@ -965,6 +1001,60 @@ export default async function run() {
       await expectCode('E_QA_NOT_FOUND', () => store.deleteQa(dirName, entry.id))
       await expectCode('E_BAD_RECORD', () => store.deleteQa(dirName, '  '))
       await expectCode('E_BOOK_NOT_FOUND', () => store.deleteQa('0'.repeat(16), 'qa-1'))
+    } finally {
+      await cleanup()
+    }
+  }
+
+  // ── 18. 书架「笔记 N」角标（0.13.0） ──
+  // 口径：只数写进「读书笔记」那份文件的块。全书地图是框架不是讨论产出，
+  // 用户自己在 Obsidian 里删掉的块也不再算——否则角标会虚高、点进去找不到。
+  {
+    const { store, cleanup } = await tempStore()
+    try {
+      const bytes = makeEpub('笔记数')
+      const { bookHash } = await store.importBook({ filename: 'a.epub', dataBase64: bytes.toString('base64') })
+
+      const countOf = async () => (await store.listShelf()).books[0].notesCount
+
+      // 台账不存在：0，不是 undefined（界面上要能直接比较）
+      const fresh = (await store.listShelf()).books[0]
+      assert.equal(fresh.notesCount, 0)
+      assert.equal(typeof fresh.notesCount, 'number')
+
+      // 2 个 note 块 + 1 个 map 块 → 数 2（map 不算）
+      await store.putNotes(bookHash, {
+        version: 1,
+        bookHash,
+        blocks: {
+          'map-body': { file: 'map', sha256: 'a'.repeat(64), userEdited: false, deletedByUser: false },
+          'ch-1': { file: 'note', sha256: 'b'.repeat(64), userEdited: false, deletedByUser: false },
+          'discuss-1': { file: 'note', sha256: 'c'.repeat(64), userEdited: false, deletedByUser: false },
+        },
+      })
+      assert.equal(await countOf(), 2, '全书地图不算进「笔记 N」')
+
+      // 用户手删的块不再算；用户改过的块仍然算（它还在文件里）
+      await store.putNotes(bookHash, {
+        version: 1,
+        bookHash,
+        blocks: {
+          'ch-1': { file: 'note', sha256: 'b'.repeat(64), userEdited: true, deletedByUser: false },
+          'ch-2': { file: 'note', sha256: 'd'.repeat(64), userEdited: false, deletedByUser: true },
+          'discuss-1': { file: 'note', sha256: 'c'.repeat(64), userEdited: false, deletedByUser: false },
+        },
+      })
+      assert.equal(await countOf(), 2)
+
+      // 坏台账（blocks 不是对象 / 块是 null）不能让书架整个打不开
+      await store.putNotes(bookHash, { version: 1, bookHash, blocks: 'oops' })
+      assert.equal(await countOf(), 0, 'blocks 不是对象时按 0 处理')
+      await store.putNotes(bookHash, { version: 1, bookHash, blocks: { x: null, y: { file: 'note' } } })
+      assert.equal(await countOf(), 1, '块为 null 跳过，缺字段的按 note 计')
+
+      // notes.json 本身坏成非 JSON：readJson 返回 null，角标静默消失
+      await fs.writeFile(path.join(store.paths.bookDir(bookDirName(bookHash)), 'notes.json'), '{ 坏掉的')
+      assert.equal(await countOf(), 0, '台账坏了书架必须还能打开')
     } finally {
       await cleanup()
     }

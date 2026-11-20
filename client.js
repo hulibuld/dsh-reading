@@ -8,11 +8,14 @@
  *   client/src/api.js
  *   client/src/style.js
  *   client/src/search.js
+ *   client/src/cnki.js
  *   client/src/ai.js
  *   client/src/legado-ui.js
  *   client/src/shelf.js
  *   client/src/toc.js
  *   client/src/distill.js
+ *   client/src/notes.js
+ *   client/src/reader-metrics.js
  *   client/src/reader.js
  *   client/src/annotate.js
  *   client/src/style-qa.js
@@ -1866,6 +1869,7 @@ window.__ModuleLoader__.load({
             contextCfiRange: P.cfiFull,
             cutoffCfi: P.cfiFull,
             model: { type: 'string' },
+            mode: { type: 'string', maxLength: 32 },
             threadId: P.ulid,
             parentId: P.ulid,
             createdAt: P.iso8601,
@@ -2223,7 +2227,7 @@ window.__ModuleLoader__.load({
           answer,
           cutoffCfi,
         }
-        for (const key of ['anchorAnnotationId', 'contextExcerpt', 'contextCfiRange', 'model', 'threadId', 'parentId']) {
+        for (const key of ['anchorAnnotationId', 'contextExcerpt', 'contextCfiRange', 'model', 'mode', 'threadId', 'parentId']) {
           if (fields[key] !== undefined) record[key] = fields[key]
         }
         if (fields.deleted !== undefined) record.deleted = fields.deleted
@@ -2324,6 +2328,15 @@ window.__ModuleLoader__.load({
         E_SOURCE_NONE: '还没有配置书源：先在找书面板里填一个搜索地址模板。',
         E_SOURCE_BAD: '这个书源的搜索地址写得不对，重新填一次。',
         E_SOURCE_FETCH: '连不上这个书源，可能是网络问题或地址写错了。',
+        // 「贴链接导入书源」这条路独有的三种失败：
+        // 用户贴的是一个网页、贴的是 file:// 这种本机地址、或者那个 JSON 大得离谱。
+        E_LEGADO_NOT_JSON: '这个地址打开是网页，不是书源文件。请换成书源 JSON 的直链（一般以 .json 结尾）。',
+        E_SOURCE_BAD_URL: '这个地址不是 http:// 或 https:// 开头，抓不了。请贴一个网页地址。',
+        E_SOURCE_TOO_BIG: '这个地址的文件太大了，不像是书源列表。请确认贴的是书源 JSON 的直链。',
+        E_PAPER_QUERY: '先输入要搜的主题词。',
+        E_PAPER_FETCH: '知网这会儿没回应，过一会儿再试。',
+        E_PAPER_EMPTY: '知网没搜到相关的文献，换个词试试。',
+        E_PAPER_COLLECT: '文献集没做成，可能是这几条题录不完整。',
         E_IMPORT_BAD_BASE64: '文件传输不完整，请重新导入一次。',
         E_ZIP_CORRUPT: '压缩包已经损坏，换一份文件再试。',
         E_XML_MALFORMED: '这本书的内部结构不合法，无法定位正文。',
@@ -2505,6 +2518,16 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * 选 PDF 的版式（0.9.8）：`'paper'` 论文、`'book'` 普通重排。
+       *
+       * 导入时宿主只给提示（`meta.pdfPaperHint`），不替用户决定；选哪边就调这边，
+       * 宿主会按目标版式真排一遍再落盘。
+       */
+      function setBookLayout(bookHash, layout) {
+        return call('book.layout', { bookHash, layout: layout === 'paper' ? 'paper' : 'book' })
+      }
+
+      /**
        * 换封面。`dataUrl` 是完整的 `data:image/...;base64,...`。
        *
        * @param {string} bookHash
@@ -2630,7 +2653,110 @@ window.__ModuleLoader__.load({
         return result && typeof result.markdown === 'string' ? result.markdown : ''
       }
 
-      return { API_BASE: API_BASE, humanizeError: humanizeError, call: call, chapterUrl: chapterUrl, assetUrl: assetUrl, coverUrl: coverUrl, searchBook: searchBook, updateBook: updateBook, putBookCover: putBookCover, resetBookCover: resetBookCover, getDeviceId: getDeviceId, clearDeviceId: clearDeviceId, aiStatus: aiStatus, aiProbe: aiProbe, aiLog: aiLog, aiLogClear: aiLogClear, aiModels: aiModels, distillGet: distillGet, distillChapter: distillChapter, distillSkeleton: distillSkeleton, distillClear: distillClear, distillExport: distillExport }
+      // ── Obsidian 笔记（0.13.0）────────────────────────────────────────
+
+      /**
+       * 本机有哪些 Obsidian 库。
+       *
+       * 读不到 obsidian.json 不算错（用户可能压根没装），所以这里永远成功，
+       * 由 found 说清楚。界面据 found=false 把整段设置藏起来。
+       */
+      async function vaultDetect() {
+        return call('vault.detect', {})
+      }
+
+      /** 手选库路径。校验（是目录、能写、不是磁盘根）在宿主侧做，失败会有中文原因。 */
+      async function vaultChoose(vaultPath) {
+        return call('vault.choose', { path: vaultPath })
+      }
+
+      /** 这本书的笔记现在长什么样：两份文件在不在、各几个块、上次同步时间。只读。 */
+      async function notesStatus(bookHash) {
+        return call('notes.status', { bookHash })
+      }
+
+      /**
+       * 同步到 Obsidian。
+       *
+       * kinds 省略 = 两份都同步；给 ['map'] 就只重做全书地图（那个便宜，笔记可能很长）。
+       */
+      async function notesSync(bookHash, kinds) {
+        const body = { bookHash }
+        if (Array.isArray(kinds) && kinds.length > 0) body.kinds = kinds
+        return call('notes.sync', body)
+      }
+
+      /** 只预览会写成什么，不落盘。 */
+      async function notesPreview(bookHash, kind = 'note') {
+        return call('notes.preview', { bookHash, kind })
+      }
+
+      /**
+       * 「这本书我写过什么」（P6）：读 vault 里这本书文件夹下已有的页。
+       *
+       * 宿主只回文件名与一二级小标题，不回正文——所以这份数据可以直接画在侧栏，
+       * 也不存在「把用户笔记喂给模型」这条路。
+       */
+      async function notesMine(bookHash) {
+        return call('notes.mine', { bookHash })
+      }
+
+      /**
+       * 这本书的读者画像：你在这本书里问过什么，笔记就照着那个侧重写。
+       *
+       * 返回的 sentence 是可以直接显示的两行字（{head, tail}）；没问过问题时是 null，
+       * 界面据此说「还没问过」，而不是显示「0 个问题」。
+       */
+      async function profileGet(bookHash) {
+        return call('profile.get', { bookHash })
+      }
+
+      /** 无视缓存重算一遍（界面上的「重新分析」）。 */
+      async function profileRebuild(bookHash) {
+        return call('profile.rebuild', { bookHash })
+      }
+
+      // ── 人物关系 / 跨书主题（0.13.0 P5）──────────────────────────────
+
+      /** 这本书的人物关系抽到哪儿了、图长什么样。只读，不写盘。 */
+      async function relationsGet(bookHash) {
+        return call('relations.get', { bookHash })
+      }
+
+      /**
+       * 抽一批人物关系。会真的调一次模型（几十秒到两分钟），调用方要自己显示进度。
+       *
+       * index 省略 = 抽下一批没抽过的；给数字 = 重抽那一批。
+       * force 只在「这本书分类标错了、明明是小说却被判成非小说」时用。
+       */
+      async function relationsBuild(bookHash, options = {}) {
+        const body = { bookHash }
+        if (Number.isInteger(options.index)) body.index = options.index
+        if (options.force === true) body.force = true
+        return call('relations.build', body)
+      }
+
+      /** 清空人物关系（重来一遍时用）。 */
+      async function relationsClear(bookHash) {
+        return call('relations.clear', { bookHash })
+      }
+
+      /**
+       * 跨书主题：候选 + 已立。
+       *
+       * 宿主会把全部书的问答扫一遍，所以这里会慢一点（几百毫秒到几秒），
+       * 但它不调模型，慢也慢得有限。
+       */
+      async function threadList() {
+        return call('thread.list', {})
+      }
+
+      /** 把一条候选立成主题页。`term` 是候选里那个词，宿主会重新算一遍再写。 */
+      async function threadBuild(term) {
+        return call('thread.build', { term })
+      }
+
+      return { API_BASE: API_BASE, humanizeError: humanizeError, call: call, chapterUrl: chapterUrl, assetUrl: assetUrl, coverUrl: coverUrl, searchBook: searchBook, updateBook: updateBook, setBookLayout: setBookLayout, putBookCover: putBookCover, resetBookCover: resetBookCover, getDeviceId: getDeviceId, clearDeviceId: clearDeviceId, aiStatus: aiStatus, aiProbe: aiProbe, aiLog: aiLog, aiLogClear: aiLogClear, aiModels: aiModels, distillGet: distillGet, distillChapter: distillChapter, distillSkeleton: distillSkeleton, distillClear: distillClear, distillExport: distillExport, vaultDetect: vaultDetect, vaultChoose: vaultChoose, notesStatus: notesStatus, notesSync: notesSync, notesPreview: notesPreview, notesMine: notesMine, profileGet: profileGet, profileRebuild: profileRebuild, relationsGet: relationsGet, relationsBuild: relationsBuild, relationsClear: relationsClear, threadList: threadList, threadBuild: threadBuild }
     })()
 
     // ─── client/src/style.js ───
@@ -2754,7 +2880,7 @@ window.__ModuleLoader__.load({
         cursor: pointer;
         box-shadow:
           inset 0 1px 0 var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.9)),
-          0 1px 2px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.08));
+          0 1px 2px rgba(23, 26, 33, 0.08);
         transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.06s;
       }
       .dr-btn:hover {
@@ -2762,11 +2888,11 @@ window.__ModuleLoader__.load({
         border-color: var(--dsw-alias-border-l2, #c9ccd4);
         box-shadow:
           inset 0 1px 0 var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.9)),
-          0 2px 6px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.12));
+          0 2px 6px rgba(23, 26, 33, 0.12);
       }
       .dr-btn:active {
         transform: translateY(1px);
-        box-shadow: inset 0 2px 4px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.18));
+        box-shadow: inset 0 2px 4px rgba(23, 26, 33, 0.18);
       }
       .dr-btn:focus-visible {
         outline: 2px solid var(--dsw-alias-brand-primary, #4a7dff);
@@ -2786,13 +2912,13 @@ window.__ModuleLoader__.load({
         color: #ffffff;
         box-shadow:
           inset 0 1px 0 rgba(255, 255, 255, 0.28),
-          0 2px 6px var(--dsw-alias-shadow-brand, rgba(74, 125, 255, 0.32));
+          0 2px 6px rgba(74, 125, 255, 0.32);
       }
       .dr-btn-primary:hover {
         background: #2a60cd;
         box-shadow:
           inset 0 1px 0 rgba(255, 255, 255, 0.3),
-          0 3px 10px var(--dsw-alias-shadow-brand, rgba(74, 125, 255, 0.4));
+          0 3px 10px rgba(74, 125, 255, 0.4);
       }
       .dr-btn-ghost {
         border-color: transparent;
@@ -3494,7 +3620,7 @@ window.__ModuleLoader__.load({
       .dr-ann-meta {
         margin-top: 3px;
         font-size: 11px;
-        color: var(--dsw-alias-label-quaternary, #a8adb5);
+        color: var(--dsw-alias-label-caption, #a8adb5);
       }
 
       /* ── 选区菜单（挂父窗口，避免被 iframe 裁切） ──────────────────── */
@@ -3585,10 +3711,45 @@ window.__ModuleLoader__.load({
       .dr-reader-bar .dr-btn-ghost { color: var(--dsh-reading-ink, #22262b); }
       .dr-reader-bar .dr-iconbtn { color: var(--dsh-reading-ink, #22262b); }
       .dr-reader-bar .dr-iconbtn:hover { background: rgba(128, 128, 128, 0.14); }
+      .dr-cell-tools {
+        font-size: 16px;
+        line-height: 1;
+        opacity: 0.72;
+      }
+      .dr-book-cell:hover .dr-cell-tools,
+      .dr-cell-tools:focus-visible { opacity: 1; }
+      @media (hover: none) {
+        .dr-cell-tools { opacity: 1; }
+      }
+
       .dr-reader .dr-iconbtn-q {
         font-weight: 700;
         font-family: ui-serif, Georgia, serif;
       }
+      /* 阅读器工具栏：按钮一律走纸面配色，不吃宿主主题。
+         用户报过「按钮底是黑的、图标也是黑的」——宿主用深色 DSH 主题时，
+         .dr-iconbtn 的背景取自 --dsh-reading-ui-bg（深色），而文字取自纸面的墨色，
+         两者撞在一起就看不见了。这里把前景背景都钉在纸面上。 */
+      .dr-reader .dr-reader-bar .dr-btn,
+      .dr-reader .dr-reader-bar .dr-iconbtn {
+        background: transparent;
+        background-image: none;
+        border-color: var(--dsh-reading-rule, #e6e2d8);
+        color: var(--dsh-reading-ink, #22262b);
+        box-shadow: none;
+      }
+      .dr-reader .dr-reader-bar .dr-btn:hover,
+      .dr-reader .dr-reader-bar .dr-iconbtn:hover {
+        background: rgba(128, 128, 128, 0.14);
+        color: var(--dsh-reading-ink, #22262b);
+      }
+      .dr-reader .dr-reader-bar .dr-btn[aria-pressed='true'],
+      .dr-reader .dr-reader-bar .dr-iconbtn[aria-pressed='true'] {
+        border-color: var(--dsh-reading-ink, #22262b);
+        background: rgba(128, 128, 128, 0.18);
+        color: var(--dsh-reading-ink, #22262b);
+      }
+
       .dr-viewport { background: var(--dsh-reading-paper, #fcfbf8); }
       .dr-frame { background: var(--dsh-reading-paper, #fcfbf8); }
       .dr-rail { color: var(--dsh-reading-ink, #22262b); }
@@ -3978,7 +4139,7 @@ window.__ModuleLoader__.load({
         line-height: 1.6;
         color: var(--dsw-alias-label-secondary, #6b7280);
         background: var(--dsw-alias-bg-layer-2, #f5f5f4);
-        border-left: 2px solid var(--dsw-alias-accent-primary, #4a7dff);
+        border-left: 2px solid var(--dsh-reading-ui-accent, #4a7dff);
         border-radius: var(--dsw-radius-xs, 4px);
         padding: 8px 10px;
         max-height: 4.9em;
@@ -4119,7 +4280,7 @@ window.__ModuleLoader__.load({
         gap: 7px;
         padding: 12px;
         border: 1px solid var(--dsw-alias-border-l1, #e3e5e8);
-        border-radius: var(--dsw-radius-m, 8px);
+        border-radius: var(--dsw-radius-md, 8px);
         background: var(--dsw-alias-bg-layer-1, #fafafa);
       }
       .dr-import-title {
@@ -4140,7 +4301,7 @@ window.__ModuleLoader__.load({
       }
       .dr-import-error {
         font-size: 11.5px;
-        color: var(--dsw-alias-label-error, #c4342b);
+        color: var(--dsw-alias-state-error-primary, #c4342b);
       }
       .dr-import-linkbtn {
         align-self: flex-start;
@@ -4158,7 +4319,7 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 8px;
         padding: 6px 8px;
-        border-radius: var(--dsw-radius-s, 6px);
+        border-radius: var(--dsw-radius-sm, 6px);
         background: var(--dsw-alias-bg-layer-2, #f2f3f5);
       }
       .dr-candidate-title {
@@ -4252,9 +4413,12 @@ window.__ModuleLoader__.load({
         /* 深色主入口（书源）：同样是自持色，不吃主题 */
         --dsh-reading-ui-ink-fill: #333842;
         --dsh-reading-ui-ink-fill-hover: #23262d;
-        --dsh-reading-ui-accent-soft: var(--dsw-alias-bg-brand-soft, rgba(47, 107, 221, 0.12));
-        --dsh-reading-ui-danger: var(--dsw-alias-label-danger, #b4362b);
-        /* 圆角：全部回落到宿主 token，缺了就用自己的档 */
+        --dsh-reading-ui-accent-soft: rgba(47, 107, 221, 0.12);
+        --dsh-reading-ui-danger: var(--dsw-alias-state-error-primary, #b4362b);
+        /* 圆角：全部回落到宿主 token，缺了就用自己的档。
+           宿主没有「零圆角」这一档（radius-none 不存在），需要在两处把圆角压平
+           （行内命中词的 mark、手机端满屏书源弹窗），所以自己留一格 0。 */
+        --dsh-reading-ui-r-none: 0;
         --dsh-reading-ui-r-sm: var(--dsw-radius-sm, 6px);
         --dsh-reading-ui-r-md: var(--dsw-radius-md, 10px);
         --dsh-reading-ui-r-lg: var(--dsw-radius-lg, 14px);
@@ -4944,7 +5108,7 @@ window.__ModuleLoader__.load({
       .dr-search-hit-snippet mark {
         background: rgba(74, 125, 255, 0.18);
         color: inherit;
-        border-radius: var(--dsw-radius-none, 0);
+        border-radius: var(--dsh-reading-ui-r-none, 0);
         padding: 0 1px;
       }
       .dr-search-hit-pos {
@@ -5243,7 +5407,7 @@ window.__ModuleLoader__.load({
         width: 7px;
         height: 7px;
         border-radius: 50%;
-        background: var(--dsw-alias-label-quaternary, #8a8a8a);
+        background: var(--dsw-alias-label-caption, #8a8a8a);
         flex: none;
       }
       .dr-ai-entry { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
@@ -5331,7 +5495,7 @@ window.__ModuleLoader__.load({
       .dr-ai-row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .dr-ai-row-detail { grid-column: 2; color: var(--dsw-alias-label-secondary, #777); font-size: 11px; word-break: break-word; }
       .dr-ai-row.is-bad .dr-ai-row-detail { color: #c0392b; }
-      .dr-ai-foot { font-size: 10.5px; color: var(--dsw-alias-label-quaternary, #8a8a8a); word-break: break-all; }
+      .dr-ai-foot { font-size: 10.5px; color: var(--dsw-alias-label-caption, #8a8a8a); word-break: break-all; }
       `
 
       /** 读书蒸馏面板样式（0.8.0）。 */
@@ -5345,7 +5509,7 @@ window.__ModuleLoader__.load({
       .dr-dist-head { display: flex; flex-direction: column; gap: 8px; }
       .dr-dist-progress { font-size: 12px; font-weight: 600; }
       .dr-dist-sub { font-weight: 400; color: var(--dsw-alias-label-secondary, #777); }
-      .dr-dist-failed { color: var(--dsw-alias-label-error, #c0392b); }
+      .dr-dist-failed { color: var(--dsw-alias-state-error-primary, #c0392b); }
       .dr-dist-note {
         font-size: 11.5px;
         line-height: 1.5;
@@ -5357,7 +5521,7 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 6px;
       }
-      .dr-dist-note-bad { background: rgba(210, 67, 56, 0.09); color: var(--dsw-alias-label-error, #c0392b); }
+      .dr-dist-note-bad { background: rgba(210, 67, 56, 0.09); color: var(--dsw-alias-state-error-primary, #c0392b); }
       .dr-dist-actions { display: flex; flex-wrap: wrap; gap: 6px; }
       .dr-dist-toast { margin: 0 12px 8px; font-size: 11.5px; color: var(--dsw-alias-label-secondary, #777); }
       .dr-dist-skeleton {
@@ -5387,13 +5551,13 @@ window.__ModuleLoader__.load({
       .dr-dist-row-head { display: flex; align-items: center; gap: 7px; font-size: 12px; }
       .dr-dist-row-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
       .dr-dist-badge { font-size: 10.5px; padding: 1px 5px; border-radius: var(--dsw-radius-sm, 4px); background: rgba(0, 0, 0, 0.07); }
-      .dr-dist-row-error { font-size: 11px; color: var(--dsw-alias-label-error, #c0392b); }
+      .dr-dist-row-error { font-size: 11px; color: var(--dsw-alias-state-error-primary, #c0392b); }
       .dr-dist-detail { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; }
       .dr-dist-thesis { font-weight: 600; line-height: 1.5; }
       .dr-dist-points { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
       .dr-dist-points .is-unverified .dr-dist-point-claim { text-decoration: line-through; opacity: 0.7; }
       .dr-dist-quote { display: block; margin-top: 2px; color: var(--dsw-alias-label-secondary, #777); font-style: italic; }
-      .dr-dist-warn { margin-left: 4px; color: var(--dsw-alias-label-error, #c0392b); }
+      .dr-dist-warn { margin-left: 4px; color: var(--dsw-alias-state-error-primary, #c0392b); }
       .dr-dist-terms { margin: 0; display: flex; flex-direction: column; gap: 3px; }
       .dr-dist-term { display: grid; grid-template-columns: 72px 1fr; gap: 6px; }
       .dr-dist-term dt { font-weight: 600; }
@@ -5411,7 +5575,7 @@ window.__ModuleLoader__.load({
       .dr-dist-method-name { font-weight: 600; }
       .dr-dist-method-when, .dr-dist-method-check { color: var(--dsw-alias-label-secondary, #777); }
       .dr-dist-steps { margin: 0; padding-left: 16px; }
-      .dr-dist-foot { font-size: 10.5px; line-height: 1.5; color: var(--dsw-alias-label-quaternary, #8a8a8a); }
+      .dr-dist-foot { font-size: 10.5px; line-height: 1.5; color: var(--dsw-alias-label-caption, #8a8a8a); }
       `
 
 
@@ -5458,7 +5622,7 @@ window.__ModuleLoader__.load({
       .dr-set-group {
         margin: 14px 0 6px;
         padding-top: 10px;
-        border-top: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+        border-top: 1px solid var(--dsw-alias-border-l3, #e7e4dd);
         font-size: 11px;
         letter-spacing: 0.04em;
         color: var(--dsw-alias-label-tertiary, #8a8a8a);
@@ -5508,7 +5672,7 @@ window.__ModuleLoader__.load({
       .dr-tab.is-on {
         background: var(--dsw-alias-bg-layer-1, #ffffff);
         color: var(--dsw-alias-label-primary, #22262b);
-        box-shadow: 0 1px 3px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.12));
+        box-shadow: 0 1px 3px rgba(23, 26, 33, 0.12);
         font-weight: 600;
       }
       /* 弹窗标题：h2 原来是浏览器默认字号，显小 */
@@ -5536,7 +5700,7 @@ window.__ModuleLoader__.load({
       .dr-legado-body .dr-input {
         height: 36px;
         padding: 0 12px;
-        border: 1px solid var(--dsw-alias-line-tertiary, #e0ddd6);
+        border: 1px solid var(--dsw-alias-border-l3, #e0ddd6);
         border-radius: var(--dsw-radius-md, 10px);
         background: var(--dsw-alias-bg-layer-1, #ffffff);
         color: var(--dsw-alias-label-primary, #22262b);
@@ -5546,7 +5710,7 @@ window.__ModuleLoader__.load({
       .dr-legado-body .dr-input:focus {
         outline: none;
         border-color: var(--dsw-alias-brand-primary, #4a7dff);
-        box-shadow: 0 0 0 3px var(--dsw-alias-brand-soft, rgba(74, 125, 255, 0.18));
+        box-shadow: 0 0 0 3px var(--dsh-reading-ui-accent-soft, rgba(74, 125, 255, 0.18));
       }
       .dr-legado-body .dr-input::placeholder { color: var(--dsw-alias-label-tertiary, #a0a4ac); }
       .dr-legado-body .dr-btn { height: 36px; padding: 0 16px; font-size: 13px; }
@@ -5558,7 +5722,7 @@ window.__ModuleLoader__.load({
         align-items: center;
         gap: 4px;
         padding: 26px 12px;
-        border: 1px dashed var(--dsw-alias-line-tertiary, #e0ddd6);
+        border: 1px dashed var(--dsw-alias-border-l3, #e0ddd6);
         border-radius: var(--dsw-radius-lg, 12px);
         color: var(--dsw-alias-label-tertiary, #8a8f98);
         font-size: 12.5px;
@@ -5580,9 +5744,9 @@ window.__ModuleLoader__.load({
         gap: 10px;
         align-items: flex-start;
         padding: 10px 12px;
-        border: 1px solid var(--dsw-alias-line-tertiary, #e7e4dd);
+        border: 1px solid var(--dsw-alias-border-l3, #e7e4dd);
         border-radius: var(--dsw-radius-md, 8px);
-        background: var(--dsw-alias-bg-primary, #fff);
+        background: var(--dsw-alias-bg-layer-1, #fff);
       }
       .dr-legado-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
       .dr-legado-name { font-size: 13.5px; font-weight: 600; color: var(--dsw-alias-label-primary, #22262b); }
@@ -5602,8 +5766,8 @@ window.__ModuleLoader__.load({
       }
       .dr-legado-item .dr-btn { flex: 0 0 auto; align-self: center; }
       .dr-legado-item:hover {
-        border-color: var(--dsw-alias-line-secondary, #d3cfc6);
-        box-shadow: 0 2px 8px var(--dsw-alias-shadow-soft, rgba(23, 26, 33, 0.08));
+        border-color: var(--dsw-alias-border-l4, #d3cfc6);
+        box-shadow: 0 2px 8px rgba(23, 26, 33, 0.08);
       }
       .dr-legado-failures { font-size: 11.5px; color: var(--dsw-alias-label-secondary, #5b6069); }
       .dr-legado-failures ul { margin: 6px 0 0; padding-left: 18px; }
@@ -5618,7 +5782,7 @@ window.__ModuleLoader__.load({
         padding-left: 8px;
       }
       @media (max-width: 720px) {
-        .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsw-radius-none, 0); }
+        .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsh-reading-ui-r-none, 0); }
         .dr-legado-item { flex-direction: column; align-items: stretch; }
         .dr-legado-item .dr-btn { width: 100%; }
       }
@@ -5647,7 +5811,7 @@ window.__ModuleLoader__.load({
       }
       .dr-aimodel-label {
         font-size: 12px;
-        color: var(--dsw-alias-text-secondary, #6b6b6b);
+        color: var(--dsw-alias-label-secondary, #6b6b6b);
         white-space: nowrap;
       }
       .dr-aimodel-select {
@@ -5663,7 +5827,7 @@ window.__ModuleLoader__.load({
       }
       .dr-aimodel-note {
         font-size: 11.5px;
-        color: var(--dsw-alias-text-tertiary, #8a8a8a);
+        color: var(--dsw-alias-label-tertiary, #8a8a8a);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -5682,7 +5846,250 @@ window.__ModuleLoader__.load({
       }
       `
 
-        return CSS_TOKENS + CSS + CSS_BASE + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL
+      /**
+       * 论文版式询问弹窗（0.10.0）
+       *
+       * 卡片宽度跟着内容走，但别让它超过手机宽度；两个按钮左右并排，
+       * 手机上自动堆成上下——手指点得着的尺寸比排版整齐重要。
+       */
+      const CSS_PAPER = `
+      .dr-paper-banner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 8px 12px 0;
+        padding: 8px 12px;
+        background: var(--dsh-reading-ui-bg-soft, #f5f4f1);
+        border: 0.5px solid var(--dsh-reading-ui-rule, #e2ded4);
+        border-radius: var(--dsh-reading-ui-r-md, 10px);
+        font-size: 12.5px;
+        color: var(--dsh-reading-ui-ink, #333842);
+      }
+      .dr-paper-banner-text {
+        flex: 1 1 220px;
+        min-width: 0;
+        line-height: 1.6;
+      }
+      @media (max-width: 640px) {
+        .dr-paper-banner { flex-direction: column; align-items: stretch; }
+        .dr-paper-banner .dr-btn { width: 100%; }
+      }
+      .dr-paper-ask {
+        max-width: 460px;
+        width: calc(100% - 32px);
+      }
+      .dr-paper-ask .dr-modal-hint {
+        font-size: 13px;
+        line-height: 1.7;
+        color: var(--dsw-alias-label-secondary, #5c5c5c);
+        margin: 0 0 10px;
+      }
+      .dr-paper-ask-title {
+        font-size: 13.5px;
+        font-weight: 600;
+        line-height: 1.6;
+        margin: 0 0 14px;
+        padding: 10px 12px;
+        border-left: 3px solid var(--dsh-reading-ui-accent, #2f6bdd);
+        background: var(--dsh-reading-ui-bg-soft, #f5f4f1);
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        word-break: break-word;
+      }
+      .dr-paper-ask .dr-modal-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+      @media (max-width: 520px) {
+        .dr-paper-ask .dr-modal-actions { flex-direction: column-reverse; }
+        .dr-paper-ask .dr-modal-actions .dr-btn { width: 100%; }
+      }
+      `
+
+      /**
+       * Obsidian 读书笔记侧栏（0.13.0）
+       *
+       * 一列条目 + 一条预览。条目要一眼看清「叫什么、写了没、上次什么时候写的」；
+       * 预览是只读的 pre，它不是编辑器，是「你将要写进去的东西」的验货台。
+       */
+      const CSS_NOTES = `
+      .dr-notes-panel { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px 14px; height: 100%; min-height: 0; overflow: auto; }
+      .dr-notes-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .dr-notes-vault {
+        flex: 1 1 160px;
+        min-width: 0;
+        font-size: 11.5px;
+        color: var(--dsw-alias-label-tertiary, #8a8a8a);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dr-notes-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .dr-notes-warn {
+        font-size: 12px;
+        line-height: 1.6;
+        padding: 7px 10px;
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        background: rgba(210, 67, 56, 0.08);
+        color: var(--dsw-alias-state-error-primary, #c0392b);
+      }
+      .dr-notes-notice {
+        font-size: 12px;
+        line-height: 1.6;
+        padding: 6px 10px;
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        background: rgba(47, 158, 95, 0.09);
+        color: var(--dsw-alias-state-success-primary, #2f7a4f);
+      }
+      .dr-notes-list { display: flex; flex-direction: column; gap: 8px; }
+      .dr-notes-row {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 9px 10px;
+        border: 1px solid var(--dsh-reading-ui-rule, #e3e1dc);
+        border-radius: var(--dsh-reading-ui-r-md, 8px);
+        background: var(--dsh-reading-ui-bg-card, #fbfaf7);
+      }
+      .dr-notes-row-ok { border-color: rgba(47, 158, 95, 0.35); }
+      .dr-notes-row-head { display: flex; align-items: center; gap: 7px; }
+      .dr-notes-row-label { font-size: 13px; font-weight: 600; }
+      .dr-notes-badge {
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        corner-shape: round;
+        background: var(--dsh-reading-ui-bg-soft, #f0eeea);
+        color: var(--dsw-alias-label-secondary, #6b6b6b);
+        white-space: nowrap;
+      }
+      .dr-notes-row-ok .dr-notes-badge { background: rgba(47, 158, 95, 0.14); color: #2f7a4f; }
+      .dr-notes-path {
+        font-size: 11px;
+        color: var(--dsw-alias-label-tertiary, #9a9a9a);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dr-notes-row-foot { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .dr-notes-time { font-size: 11px; color: var(--dsw-alias-label-tertiary, #9a9a9a); }
+      .dr-notes-preview {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 9px 10px;
+        border: 1px dashed var(--dsh-reading-ui-rule, #ddd9d2);
+        border-radius: var(--dsh-reading-ui-r-md, 8px);
+        background: var(--dsh-reading-ui-bg-soft, #f7f5f1);
+      }
+      .dr-notes-preview-head { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+      .dr-notes-preview-path { font-size: 11px; color: var(--dsw-alias-label-tertiary, #9a9a9a); word-break: break-all; }
+      .dr-notes-preview-text {
+        margin: 0;
+        max-height: 320px;
+        overflow: auto;
+        font-family: var(--dsh-reading-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+        font-size: 11.5px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: var(--dsh-reading-ui-bg-card, #fff);
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        padding: 8px;
+      }
+      .dr-notes-foot { margin-top: auto; display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; line-height: 1.65; color: var(--dsw-alias-label-tertiary, #8a8a8a); }
+      .dr-notes-pending { color: var(--dsw-alias-state-warn-label, #a8720a); }
+      /* 「读者画像 / 人物关系 / 跨书主题 / 我写过什么」四张卡共用的外壳（0.13.0）。
+         它们都是笔记面板里的次级卡片：比下面的文件清单轻一档，比正文重一档 ——
+         用 1px 描边 + 极浅底，不抢「全部写入」那个主按钮的视觉重量。 */
+      .dr-profile {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        padding: 8px 9px;
+        border: 1px solid var(--dsh-reading-ui-rule, rgba(0, 0, 0, 0.09));
+        border-radius: var(--dsh-reading-ui-r-md, 8px);
+        background: var(--dsh-reading-ui-bg-soft, #f7f6f3);
+      }
+      .dr-profile-head { display: flex; align-items: center; gap: 6px; }
+      .dr-profile-title { font-size: 12px; font-weight: 600; }
+      .dr-profile-line {
+        font-size: 12px;
+        line-height: 1.6;
+        color: var(--dsw-alias-label-secondary, #5b6069);
+        word-break: break-word;
+      }
+      .dr-profile-sub {
+        font-size: 11.5px;
+        line-height: 1.55;
+        color: var(--dsw-alias-label-tertiary, #8a8a8a);
+        word-break: break-word;
+      }
+      /* 空态卡片不描边：没有内容时再画个框，看起来像加载失败 */
+      .dr-profile-empty { border-style: dashed; background: transparent; }
+      /* 「我写过什么」里那一列小标题：贴紧一点，一眼能数清几条 */
+      .dr-mine .dr-notes-path { display: flex; flex-direction: column; gap: 1px; }
+
+
+      /* 设置抽屉里「输入框 + 按钮」一行放：库路径、子目录名都是这个形状。
+         窄了就让输入框掉下去占满一整行，按钮贴在下面。 */
+      .dr-field-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+      .dr-field-row .dr-input { flex: 1 1 180px; min-width: 0; }
+      .dr-field-path {
+        font-size: 11.5px;
+        line-height: 1.55;
+        color: var(--dsw-alias-label-secondary, #5b6069);
+        word-break: break-all;
+        background: var(--dsh-reading-ui-bg-soft, #f5f4f1);
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        padding: 5px 8px;
+      }
+      .dr-field .dr-linkbtn {
+        align-self: flex-start;
+        font-size: 12px;
+      }
+      /* 书架卡片右下角的「笔记 N」（0.13.0）：点它直接开这本书的笔记页。
+         绝对定位挂在 .dr-book-cell 上，和右上角的 ⋯ / × 同一套坐标体系——
+         卡片本身是 <button>，按钮不能套按钮，所以它是格子的兄弟节点。 */
+      .dr-notes-chip {
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        display: inline-flex;
+        align-items: center;
+        padding: 1px 6px;
+        border: 0;
+        border-radius: var(--dsh-reading-ui-r-sm, 6px);
+        background: rgba(47, 107, 221, 0.10);
+        color: var(--dsh-reading-ui-accent, #2f6bdd);
+        font-size: 10.5px;
+        line-height: 1.6;
+        white-space: nowrap;
+        cursor: pointer;
+        transition: background 0.12s, color 0.12s;
+      }
+      .dr-notes-chip:hover {
+        background: var(--dsh-reading-ui-accent, #2f6bdd);
+        color: #ffffff;
+      }
+      .dr-notes-chip:focus-visible {
+        outline: 2px solid var(--dsh-reading-ui-accent, #2f6bdd);
+        outline-offset: 2px;
+      }
+      /* 角标压着的那行「已读 x%」要让出位置，不然字叠字 */
+      .dr-book-meta-notes { padding-right: 52px; }
+
+      @media (max-width: 720px) {
+        .dr-notes-head { flex-direction: column; align-items: stretch; }
+        .dr-notes-actions .dr-btn { flex: 1 1 40%; }
+        /* 窄屏卡片更小，角标跟着收一点，别把「已读 12%」挤掉 */
+        .dr-notes-chip { bottom: 10px; right: 10px; font-size: 10px; }
+        .dr-book-meta-notes { padding-right: 46px; }
+      }
+      `
+
+        return CSS_TOKENS + CSS + CSS_BASE + CSS_V060 + CSS_MOBILE + CSS_AI + CSS_DISTILL + CSS_SETTINGS_GROUPS + CSS_SHELF_BUTTONS + CSS_LEGADO + CSS_AIMODEL + CSS_PAPER + CSS_NOTES
       }
 
       /**
@@ -6030,6 +6437,172 @@ window.__ModuleLoader__.load({
       }
 
       return { highlightSnippet: highlightSnippet, SearchPanel: SearchPanel }
+    })()
+
+    // ─── client/src/cnki.js ───
+    var __mod_cnki_js = (function () {
+      /**
+       * cnki.js —— 知网检索界面的纯函数层（0.12.0）。
+       *
+       * 这里只放「不碰 DOM、不碰网络」的判定与拼装：
+       *   normalizeTitle   —— 书名/题名的归一化，用来判断「这篇是不是已经在书架里」；
+       *   isInShelf        —— 那条检索结果在不在书架；
+       *   SEARCH_MODES / resolveSearchMode —— 面板「怎么找」那张表（选项 → field + order）；
+       *   paperToMarkdown  —— 单条题录拼成一行 Markdown，供「复制题录」用；
+       *   collectName      —— 文献集的默认书名。
+       *
+       * 为什么单独一个模块：shelf.js 是组件，渲染路径上抛错会让整个面板静默消失，
+       * 而这些判定（书名号、空白、全半角标点）恰恰是最容易在边界上出错的地方，
+       * 抽出来就能脱网单测（test/cnki_ui_test.mjs）。
+       */
+
+      /**
+       * 题名里「不影响是不是同一篇」的字符：书名号、各种引号、顿号逗号句号、
+       * 冒号分号、问叹号、括号、方括号、破折号、连字符、斜杠、间隔号。
+       *
+       * 知网给的是《大型滑坡研究》，而书架里的书名常常写成「大型滑坡研究」——只比
+       * 字面量的话，用户会觉得「明明有却说没有」。**只做字符归一，不做后缀容忍**：
+       * 「大型滑坡研究（修订版）」归一后是「大型滑坡研究修订版」，与「大型滑坡研究」
+       * 不相等，仍判为不在书架（宁可少标一个角标，也不要把两篇不同的文献并成一笔）。
+       */
+      const TITLE_NOISE = /[《》〈〉“”‘’"'、，,。.：:；;！!？?（）()【】[\]—\-_/·]/g
+
+      /**
+       * 归一化题名：转小写 → 去掉所有空白 → 去掉标点噪声。
+       *
+       * **不做 NFKC**：全角字母数字（`２０世纪`、`滑坡ＡＢＣ研究`）与半角不判相等。
+       * 文档里写的「全半角统一」指的是标点（`（一）` 与 `(一)`、`甲，乙` 与 `甲,乙`），
+       * 这条能力 TITLE_NOISE 已经给了；再往前一步去归一字母数字，判断依据就从「同一个
+       * 字符」变成「看起来像同一个字符」，误合并的成本比多标一个角标高。
+       *
+       * @param {unknown} raw
+       * @returns {string}
+       */
+      function normalizeTitle(raw) {
+        if (typeof raw !== 'string' || raw === '') return ''
+        return raw
+          .toLowerCase()
+          .replace(/\s+/g, '')
+          .replace(TITLE_NOISE, '')
+      }
+
+      /**
+       * 面板「怎么找」那张表：下拉的四个选项，以及它们背后的检索字段与排序。
+       *
+       * 为什么要单独抽成常量：这张表曾经把「下载最多」写成 `content=词&Order=3`，而
+       * 知网的 `Order=3` 和 `Order=4` 一样是**全局排序**——`content=` 允许正文任意位置
+       * 命中，两者一乘捞回来的是全库下载榜（真机实测「滑坡」20 条里只有 1 条标题含词，
+       * 首条是《中国特色社会主义理论体系的传统文化基础研究》）。界面上完全看不出来：
+       * 跑题结果的下载数更大，标签还写着「下载最多」。所以三种排序都配篇名检索，
+       * 只有「相关度」用自由词（它本来就不排序，靠相关度兜）。
+       *
+       * value 是 `field-order` 拼起来的字符串，与 select 的取值一一对应。
+       */
+      const SEARCH_MODES = [
+        { value: 'title-4', label: '经典文献（被引最高）', field: 'title', order: 4 },
+        { value: 'title-2', label: '最新发表', field: 'title', order: 2 },
+        { value: 'content-1', label: '相关度', field: 'content', order: 1 },
+        { value: 'title-3', label: '下载最多', field: 'title', order: 3 },
+      ]
+
+      /** 下拉的缺省值：不认得的值一律退回「经典文献」。 */
+      const DEFAULT_SEARCH_MODE = SEARCH_MODES[0]
+
+      /**
+       * 把 select 的值拆回 `{field, order}`。
+       *
+       * 解析放在这里而不是 shelf.js 的 onChange 里：那边是 `lastIndexOf('-')` 手拆，
+       * 拆错了界面照跑、只是搜错东西，正是上面那张表出事的方式。让它可单测。
+       *
+       * @param {unknown} value
+       * @returns {{ field: string, order: number, value: string }}
+       */
+      function resolveSearchMode(value) {
+        const raw = typeof value === 'string' ? value : ''
+        const found = SEARCH_MODES.find((mode) => mode.value === raw)
+        const mode = found || DEFAULT_SEARCH_MODE
+        return { field: mode.field, order: mode.order, value: mode.value }
+      }
+
+      /** 把任意值压成去空白的字符串；非字符串一律当空。 */
+      function text(value) {
+        return typeof value === 'string' ? value.trim() : ''
+      }
+
+      /** 计数：只接受有限非负数，其余当 0（避免 undefined / NaN 进正文）。 */
+      function count(value) {
+        const number = Number(value)
+        if (!Number.isFinite(number) || number < 0) return 0
+        return Math.floor(number)
+      }
+
+      /**
+       * 这条检索结果是不是已经在书架里了。
+       *
+       * 作者只作辅助、不强求相等：知网上写「黄润秋」，PDF 里可能是「黄润秋 等」，
+       * 要求一致会让角标几乎永远不出现。所以只比归一后的题名。
+       *
+       * @param {{ title?: string } | null | undefined} item
+       * @param {Array<{ title?: string }> | null | undefined} books
+       * @returns {boolean}
+       */
+      function isInShelf(item, books) {
+        if (!Array.isArray(books) || books.length === 0) return false
+        const title = normalizeTitle(item && item.title)
+        if (title === '') return false
+        return books.some((book) => normalizeTitle(book && book.title) === title)
+      }
+
+      /**
+       * 单条题录 → Markdown 一行（有网址时再多一行缩进）。
+       *
+       * 形状固定为：
+       *   - 《题名》. 作者、作者. 期刊, 年期. 被引 N, 下载 N.
+       *     https://…
+       *
+       * 缺字段时整段省略，**不许**出现 undefined / null / 空括号：
+       * 作者空了就不要那一段；期刊与年期只剩一个就只写那一个；都没了就省略；
+       * 网址空了就不写第二行（按钮那边也会因此变成不可点）。
+       *
+       * @param {object | null | undefined} item
+       * @returns {string}
+       */
+      function paperToMarkdown(item) {
+        const source = item && typeof item === 'object' ? item : {}
+        const title = text(source.title) || '未命名文献'
+        const authors = Array.isArray(source.authors)
+          ? source.authors.map((name) => text(name)).filter((name) => name !== '')
+          : []
+        const journal = text(source.journal)
+        const issue = text(source.issue)
+        const citations = count(source.citations)
+        const downloads = count(source.downloads)
+        const url = text(source.url)
+
+        const parts = [`- 《${title}》`]
+        if (authors.length > 0) parts.push(authors.join('、'))
+        const source2 = [journal, issue].filter((value) => value !== '').join(', ')
+        if (source2 !== '') parts.push(source2)
+        parts.push(`被引 ${citations}, 下载 ${downloads}`)
+
+        let line = `${parts.join('. ')}.`
+        if (url !== '') line += `\n  ${url}`
+        return line
+      }
+
+      /**
+       * 文献集的默认书名。条数取整、下限 1，保证不会出现「0 篇」这种怪名字。
+       *
+       * @param {number} count
+       * @returns {string}
+       */
+      function collectName(count) {
+        const number = Number(count)
+        const total = Number.isFinite(number) && number > 0 ? Math.floor(number) : 1
+        return `文献集 · ${total} 篇`
+      }
+
+      return { normalizeTitle: normalizeTitle, SEARCH_MODES: SEARCH_MODES, resolveSearchMode: resolveSearchMode, isInShelf: isInShelf, paperToMarkdown: paperToMarkdown, collectName: collectName }
     })()
 
     // ─── client/src/ai.js ───
@@ -6556,6 +7129,7 @@ window.__ModuleLoader__.load({
         const [sources, setSources] = React.useState(null)
         const [sourceError, setSourceError] = React.useState('')
         const [importText, setImportText] = React.useState('')
+        const [importUrl, setImportUrl] = React.useState('')
         const [importing, setImporting] = React.useState(false)
         const [adding, setAdding] = React.useState('')
         const [added, setAdded] = React.useState([])
@@ -6619,6 +7193,32 @@ window.__ModuleLoader__.load({
             if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
             setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
             setImportText('')
+            await reloadSources()
+          } catch (err) {
+            setSourceError(errorText(err))
+          } finally {
+            setImporting(false)
+          }
+        }
+
+        // 贴链接：服务端替你把 JSON 抓下来再解析，用户不用先存文件、也不用复制几兆文本。
+        const doImportUrl = async () => {
+          const link = importUrl.trim()
+          if (link === '') {
+            setSourceError('先把书源 JSON 的链接贴进来。')
+            return
+          }
+          setImporting(true)
+          setSourceError('')
+          try {
+            const data = await call('source.legado.import', { url: link })
+            const rejected = Array.isArray(data?.rejected) ? data.rejected : []
+            const parts = []
+            if (data?.added) parts.push(`新增 ${data.added} 个`)
+            if (data?.updated) parts.push(`更新 ${data.updated} 个`)
+            if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
+            setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
+            setImportUrl('')
             await reloadSources()
           } catch (err) {
             setSourceError(errorText(err))
@@ -6780,7 +7380,33 @@ window.__ModuleLoader__.load({
             'details',
             { className: 'dr-legado-import', open: sources !== null && sources.length === 0 },
             h('summary', null, '导入书源'),
-            h('p', { className: 'dr-note' }, 'Legado「网络导入」拿到的 JSON，整包粘进来就行；一个包里几十上百个源都能一次导入。'),
+            h('p', { className: 'dr-note' }, '最省事的是贴链接：书源 JSON 的地址（通常是 .json 结尾）直接粘进来，插件替你去下载。'),
+            h(
+              'div',
+              { className: 'dr-legado-row' },
+              h('input', {
+                type: 'url',
+                className: 'dr-input',
+                placeholder: 'https://example.com/sources/xxxx.json',
+                value: importUrl,
+                'aria-label': '书源 JSON 链接',
+                onChange: (event) => setImportUrl(event.target.value),
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') doImportUrl()
+                },
+              }),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-primary',
+                  disabled: importing,
+                  onClick: doImportUrl,
+                },
+                importing ? '导入中…' : '从链接导入',
+              ),
+            ),
+            h('p', { className: 'dr-note' }, '另一种给法：Legado「网络导入」拿到的 JSON 整包粘在下面，或者选一个 .json 文件。'),
             h('textarea', {
               className: 'dr-input dr-legado-textarea',
               rows: 6,
@@ -6939,9 +7565,15 @@ window.__ModuleLoader__.load({
             const humanizeError = __mod_api_js.humanizeError
             const putBookCover = __mod_api_js.putBookCover
             const resetBookCover = __mod_api_js.resetBookCover
+            const setBookLayout = __mod_api_js.setBookLayout
             const updateBook = __mod_api_js.updateBook
             const LegadoPanel = __mod_legado_ui_js.LegadoPanel
             const AiModelBar = __mod_ai_js.AiModelBar
+            const SEARCH_MODES = __mod_cnki_js.SEARCH_MODES
+            const collectName = __mod_cnki_js.collectName
+            const isInShelf = __mod_cnki_js.isInShelf
+            const paperToMarkdown = __mod_cnki_js.paperToMarkdown
+            const resolveSearchMode = __mod_cnki_js.resolveSearchMode
 
       /** 单次导入的界面提示上限：超过这个大小先提醒一句，但不阻止（宿主说了算）。 */
       const BIG_FILE_BYTES = 120 * 1024 * 1024
@@ -7198,6 +7830,7 @@ window.__ModuleLoader__.load({
       function BookCard(props) {
         const book = props.book
         const percent = typeof book.percent === 'number' ? book.percent : 0
+        const notesCount = typeof book.notesCount === 'number' && book.notesCount > 0 ? book.notesCount : 0
         const title = book.title || '未命名'
         // 带版本号的封面地址：换完封面的那一刻版本号变了，地址就变了，
         // 不会被浏览器按老缓存顶回旧图（coverVersion 由宿主维护，换/删一次 +1）。
@@ -7247,7 +7880,12 @@ window.__ModuleLoader__.load({
               style: { width: `${Math.round(Math.max(0, Math.min(1, percent)) * 100)}%` },
             }),
           ),
-          h('div', { className: 'dr-book-meta' }, percent > 0 ? percentText(percent) : '还没开始读'),
+          // 有笔记时右边要让出一条给角标，否则「还没开始读」会和角标叠在一起。
+          h(
+            'div',
+            { className: notesCount > 0 ? 'dr-book-meta dr-book-meta-notes' : 'dr-book-meta' },
+            percent > 0 ? percentText(percent) : '还没开始读',
+          ),
         )
       }
 
@@ -7258,6 +7896,110 @@ window.__ModuleLoader__.load({
        * updatedAt，而这个字段是封面地址的版本号。封面必须紧跟最后一次写盘，
        * 否则书架重新取列表时拿到的还是旧版本号，图和文字会各说各话。
        */
+      /**
+       * 导入之后问一句：「这本像论文，按论文排还是按书排？」
+       *
+       * 宿主不替用户决定（`meta.pdfPaperHint` 只是线索），所以这里必须让人自己点。
+       * 弹窗结构沿用书源面板那套：遮罩层负责居中，卡片自己不带定位——上次把卡片
+       * 直接渲染成 `.dr-modal`，它没有定位，就飞到左下角去了。
+       */
+      function LayoutPrompt(props) {
+        const hint = props.hint || {}
+        const [saving, setSaving] = useState(false)
+        const [error, setError] = useState('')
+
+        const choose = useCallback(
+          async (layout) => {
+            setSaving(true)
+            setError('')
+            try {
+              await setBookLayout(props.bookHash, layout)
+              if (typeof props.onChosen === 'function') props.onChosen(layout)
+            } catch (err) {
+              setError(humanizeError(err))
+              setSaving(false)
+            }
+          },
+          [props],
+        )
+
+        // 必须留一条退路：两种版式都排不出来时（文件被移走、meta 坏了），
+        // 用户不能被困在这个遮罩后面。遮罩点击、Esc、「先不选」都通到同一个出口。
+        const dismiss = useCallback(() => {
+          if (saving) return
+          if (typeof props.onCancel === 'function') props.onCancel()
+        }, [props, saving])
+
+        useEffect(() => {
+          if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+          const onKey = (event) => {
+            if (event && event.key === 'Escape') dismiss()
+          }
+          window.addEventListener('keydown', onKey)
+          return () => window.removeEventListener('keydown', onKey)
+        }, [dismiss])
+
+        return h(
+          'div',
+          { className: 'dr-modal-mask', role: 'presentation', onClick: dismiss },
+          h(
+            'div',
+            {
+              className: 'dr-modal dr-paper-ask',
+              role: 'dialog',
+              'aria-modal': 'true',
+              'aria-label': '选择排版方式',
+              onClick: (event) => event.stopPropagation(),
+            },
+            h('h2', { className: 'dr-modal-title' }, '这本看起来是论文'),
+            h(
+              'p',
+              { className: 'dr-modal-hint' },
+              `开头几行里认到了「${hint.reason || '摘要或关键词'}」。按哪种排？选错了以后还能在「✎ 编辑」里改。`,
+            ),
+            hint.title
+              ? h('p', { className: 'dr-paper-ask-title' }, hint.title)
+              : null,
+            error ? h('p', { className: 'dr-form-error', role: 'alert' }, error) : null,
+            h(
+              'div',
+              { className: 'dr-modal-actions' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-primary',
+                  disabled: saving,
+                  onClick: () => choose('paper'),
+                },
+                '按论文排版',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn',
+                  disabled: saving,
+                  onClick: () => choose('book'),
+                },
+                '按普通书排版',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-ghost',
+                  title: '先不选，保持现在的样子',
+                  disabled: saving,
+                  onClick: dismiss,
+                },
+                '先不选',
+              ),
+            ),
+          ),
+        )
+      }
+
       function BookEditDialog(props) {
         const book = props.book
         const [title, setTitle] = useState(typeof book.title === 'string' ? book.title : '')
@@ -7268,6 +8010,9 @@ window.__ModuleLoader__.load({
         const [series, setSeries] = useState(typeof book.series === 'string' ? book.series : '')
         const [tagText, setTagText] = useState(Array.isArray(book.tags) ? book.tags.join('、') : '')
         const [favorite, setFavorite] = useState(book.favorite === true)
+        // 版式（0.9.8）：只有 PDF 需要问，其它书没有这个概念。
+        const isPdf = book.sourceFormat === 'pdf'
+        const [layout, setLayout] = useState(book.pdfLayout === 'paper' ? 'paper' : 'book')
         const [coverDataUrl, setCoverDataUrl] = useState('')
         const [coverCleared, setCoverCleared] = useState(false)
         const [saving, setSaving] = useState(false)
@@ -7358,6 +8103,11 @@ window.__ModuleLoader__.load({
               tags,
               favorite,
             })
+            if (isPdf && layout !== (book.pdfLayout === 'paper' ? 'paper' : 'book')) {
+              // 换版式是重排整本书，放在字段保存之后：书名这些先落地，
+              // 万一重排失败，至少改好的书名没丢。
+              await setBookLayout(book.bookHash, layout)
+            }
             const saved = result && typeof result === 'object'
               && result.book && typeof result.book === 'object' ? result.book : null
             if (typeof props.onSaved === 'function') props.onSaved(saved)
@@ -7409,6 +8159,29 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'dr-modal-body' },
+              isPdf
+                ? h(
+                  'div',
+                  { className: 'dr-field' },
+                  h('div', { className: 'dr-field-label' }, '排版方式'),
+                  h(
+                    'select',
+                    {
+                      className: 'dr-input dr-select',
+                      value: layout,
+                      disabled: saving,
+                      onChange: (event) => setLayout(event.target.value === 'paper' ? 'paper' : 'book'),
+                    },
+                    h('option', { value: 'book' }, '普通书（按页/按标题分章）'),
+                    h('option', { value: 'paper' }, '论文（标题、摘要、关键词、参考文献）'),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dr-field-value' },
+                    '换版式会重新分章，阅读进度回到开头；批注可能对不上位置。',
+                  ),
+                )
+                : null,
               h(
                 'div',
                 { className: 'dr-field' },
@@ -7568,6 +8341,19 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'dr-modal-foot' },
+              typeof props.onDistill === 'function'
+                ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dr-btn dr-btn-ghost',
+                    title: '把这本书按章蒸成能带走的笔记',
+                    disabled: saving,
+                    onClick: () => props.onDistill(book.bookHash),
+                  },
+                  '读书蒸馏',
+                )
+                : null,
               h(
                 'button',
                 {
@@ -7611,7 +8397,8 @@ window.__ModuleLoader__.load({
        * 三条路并列摆出来，而不是藏在二级菜单里：
        *   ① 本地文件 —— 原来就有的行为；
        *   ② 粘贴链接 —— 从任何地方复制来的书籍直链，粘进来就下载入架；
-       *   ③ 找书     —— 用户自己填一个「搜索地址模板」，插件去抓结果页列出候选。
+       *   ③ 找书     —— 用户自己填一个「搜索地址模板」，插件去抓结果页列出候选；
+       *   ④ 知网检索 —— 直接搜知网，勾几条存成一本文献集（0.12.0）。
        *
        * 为什么不内置书源：插件不该替用户决定去哪个站点找书。这里只提供机制，
        * 地址由用户自己填；模板里 `{query}` 会被换成关键词。
@@ -7638,6 +8425,21 @@ window.__ModuleLoader__.load({
         const [formError, setFormError] = useState('')
         const [savingSource, setSavingSource] = useState(false)
 
+        // ④ 知网检索（0.12.0）
+        const [paperQuery, setPaperQuery] = useState('')
+        const [paperField, setPaperField] = useState('title')
+        const [paperOrder, setPaperOrder] = useState(4)
+        const [paperYear, setPaperYear] = useState('')
+        const [paperBusy, setPaperBusy] = useState(false)
+        const [paperError, setPaperError] = useState('')
+        const [paperInfo, setPaperInfo] = useState('')
+        const [paperCopiedAt, setPaperCopiedAt] = useState(-1) // 刚复制完的那一条（下标），2 秒后回 -1
+        const [papers, setPapers] = useState(null) // null = 还没搜过
+        const [paperPicked, setPaperPicked] = useState([]) // 勾选的下标数组
+        const [paperCollecting, setPaperCollecting] = useState(false)
+        const [paperCollectInfo, setPaperCollectInfo] = useState('')
+        const [shelfTitles, setShelfTitles] = useState([]) // 书架里已有的 {title, author}
+
         useEffect(() => {
           let alive = true
           call('settings.get')
@@ -7657,6 +8459,35 @@ window.__ModuleLoader__.load({
             alive = false
           }
         }, [])
+
+        // 书架里已有的书名：只用来给检索结果显示「已在本地」角标。
+        // 读不到就当没有——这一步失败绝不能让整个面板打不开。
+        useEffect(() => {
+          let alive = true
+          call('shelf.list')
+            .then((value) => {
+              if (!alive) return
+              const list = value && Array.isArray(value.books) ? value.books : []
+              setShelfTitles(list.map((book) => ({ title: book && book.title, author: book && book.author })))
+            })
+            .catch(() => {
+              if (!alive) return
+              setShelfTitles([])
+            })
+          return () => {
+            alive = false
+          }
+        }, [])
+
+        // 「已复制」这类一句话提示，两秒后自己走：不该占着屏幕等用户点掉。
+        useEffect(() => {
+          if (paperInfo === '' && paperCopiedAt < 0) return undefined
+          const timer = setTimeout(() => {
+            setPaperInfo('')
+            setPaperCopiedAt(-1)
+          }, 2000)
+          return () => clearTimeout(timer)
+        }, [paperInfo, paperCopiedAt])
 
         const busy = urlBusy || downloading !== '' || savingSource
         const close = () => {
@@ -7753,6 +8584,218 @@ window.__ModuleLoader__.load({
             setSavingSource(false)
           }
         }
+
+        /** 「复制题录」：剪贴板优先，失败就说清楚，不假装成功。 */
+        const copyPaper = async (item, index) => {
+          const markdown = paperToMarkdown(item)
+          let copied = false
+          try {
+            if (typeof navigator !== 'undefined' && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+              await navigator.clipboard.writeText(markdown)
+              copied = true
+            }
+          } catch (error) {
+            copied = false
+          }
+          // 「已复制」显示在**被点的那一个按钮**上：整段只弹一句提示时，用户看不出
+          // 到底复制了哪一条，勾错行会把别人的题录贴进文档。
+          setPaperCopiedAt(copied ? index : -1)
+          setPaperInfo(copied ? '' : '这个环境不让自动复制，请手动选中题录')
+        }
+
+        const runPaperSearch = async () => {
+          const value = paperQuery.trim()
+          if (value === '') {
+            setPaperError('先输入要搜的主题词。')
+            return
+          }
+          setPaperBusy(true)
+          setPaperError('')
+          setPaperInfo('')
+          setPaperCollectInfo('')
+          setPaperPicked([])
+          try {
+            const result = await call('paper.search', {
+              query: value,
+              field: paperField,
+              order: paperOrder,
+              year: paperYear.trim(),
+            })
+            const list = result && Array.isArray(result.items) ? result.items : []
+            setPapers(list)
+          } catch (error) {
+            setPapers(null)
+            setPaperError(humanizeError(error))
+          } finally {
+            setPaperBusy(false)
+          }
+        }
+
+        const togglePicked = (index) => {
+          setPaperPicked((prev) => (prev.includes(index)
+            ? prev.filter((value) => value !== index)
+            : [...prev, index].sort((a, b) => a - b)))
+        }
+
+        const collectPapers = async () => {
+          if (paperCollecting || paperPicked.length === 0 || !Array.isArray(papers)) return
+          const items = paperPicked.map((index) => papers[index]).filter((item) => item !== undefined)
+          if (items.length === 0) return
+          const title = collectName(items.length)
+          setPaperCollecting(true)
+          setPaperError('')
+          setPaperCollectInfo('')
+          try {
+            await call('paper.collect', { title, items })
+            setPaperCollectInfo(`已存成《${title}》，去书架看看`)
+            setPaperPicked([])
+            setPapers(null)
+            // 通知书架刷新：新书要立刻出现，不能等用户手动点刷新。
+            if (typeof props.onCollected === 'function') props.onCollected()
+          } catch (error) {
+            // 失败不清勾选：用户重试一次就好，不该让他重新一条条勾。
+            setPaperError(humanizeError(error))
+          } finally {
+            setPaperCollecting(false)
+          }
+        }
+
+        const paperTypeText = (type) => {
+          const value = typeof type === 'string' ? type.trim() : ''
+          if (value === '硕士论文' || value === '博士论文' || value === '中国会议' || value === '期刊') return value
+          return value === '' ? '期刊' : value
+        }
+
+        const paperResults = Array.isArray(papers)
+          ? h(
+            'div',
+            null,
+            papers.length === 0
+              ? h('div', { className: 'dr-import-hint' }, '知网没搜到相关的文献，换个词试试。')
+              : h(
+                'div',
+                { className: 'dr-candidates' },
+                papers.map((item, index) => h(
+                  'div',
+                  { key: `${index}-${item && item.title ? item.title : ''}`, className: 'dr-candidate', style: { flexDirection: 'column', alignItems: 'stretch', gap: '4px' } },
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+                    h(
+                      'span',
+                      {
+                        className: 'dr-paper-type',
+                        style: {
+                          flex: 'none',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          background: 'var(--dsw-alias-bg-layer-1, #fafafa)',
+                          color: 'var(--dsw-alias-label-secondary, #5c6066)',
+                        },
+                      },
+                      paperTypeText(item && item.type),
+                    ),
+                    h('div', { className: 'dr-candidate-title', title: item && item.title ? item.title : '' }, (item && item.title) || '未命名文献'),
+                    isInShelf(item, shelfTitles)
+                      ? h(
+                        'span',
+                        {
+                          className: 'dr-paper-local',
+                          style: {
+                            flex: 'none',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            fontSize: '11px',
+                            background: 'var(--dsw-alias-bg-layer-1, #fafafa)',
+                            color: 'var(--dsw-alias-label-tertiary, #8a8f98)',
+                          },
+                        },
+                        '已在本地',
+                      )
+                      : null,
+                  ),
+                  h(
+                    'div',
+                    { className: 'dr-import-hint' },
+                    [
+                      Array.isArray(item && item.authors) ? item.authors.filter((name) => typeof name === 'string' && name !== '').join('、') : '',
+                      [item && item.journal, item && item.issue].filter((value) => typeof value === 'string' && value !== '').join(' '),
+                    ].filter((value) => value !== '').join(' · ') || '题录信息不全',
+                  ),
+                  h(
+                    'div',
+                    { className: 'dr-import-hint' },
+                    `被引 ${Number(item && item.citations) || 0} · 下载 ${Number(item && item.downloads) || 0}`,
+                  ),
+                  item && typeof item.snippet === 'string' && item.snippet !== ''
+                    ? h(
+                      'div',
+                      {
+                        className: 'dr-import-hint',
+                        style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                      },
+                      item.snippet,
+                    )
+                    : null,
+                  h(
+                    'div',
+                    { className: 'dr-import-row' },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dr-btn',
+                        disabled: !(item && typeof item.url === 'string' && item.url !== ''),
+                        onClick: () => {
+                          if (item && item.url) window.open(item.url, '_blank', 'noopener')
+                        },
+                      },
+                      '打开知网页',
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dr-btn',
+                        'aria-label': paperCopiedAt === index ? '已复制这条题录' : '复制这条题录',
+                        onClick: () => copyPaper(item, index),
+                      },
+                      paperCopiedAt === index ? '已复制' : '复制题录',
+                    ),
+                    h(
+                      'label',
+                      { className: 'dr-import-hint', style: { display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' } },
+                      h('input', {
+                        type: 'checkbox',
+                        checked: paperPicked.includes(index),
+                        'aria-label': `选中《${(item && item.title) || '这条文献'}》`,
+                        onChange: () => togglePicked(index),
+                      }),
+                      '选这篇',
+                    ),
+                  ),
+                )),
+              ),
+            papers.length > 0
+              ? h(
+                'div',
+                { className: 'dr-import-row' },
+                h('div', { className: 'dr-import-hint' }, `已选 ${paperPicked.length} 篇`),
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dr-btn dr-btn-primary',
+                    disabled: paperPicked.length === 0 || paperCollecting,
+                    onClick: collectPapers,
+                  },
+                  paperCollecting ? '正在存…' : '存成文献集',
+                ),
+              )
+              : null,
+          )
+          : null
 
         const fileInput = h('input', {
           ref: fileRef,
@@ -7946,6 +8989,67 @@ window.__ModuleLoader__.load({
                     '添加/修改书源',
                   ),
               ),
+              // ④ 知网检索
+              h(
+                'div',
+                { className: 'dr-import-section' },
+                h('div', { className: 'dr-import-title' }, '④ 知网检索'),
+                h('div', { className: 'dr-import-hint' }, '直接搜知网上的文献，勾几条存成一本文献集，放进书架慢慢看。'),
+                h(
+                  'div',
+                  { className: 'dr-import-row' },
+                  h(
+                    'select',
+                    {
+                      className: 'dr-input dr-select',
+                      value: `${paperField}-${paperOrder}`,
+                      'aria-label': '怎么找',
+                      onChange: (event) => {
+                        const mode = resolveSearchMode(event.target.value)
+                        setPaperField(mode.field)
+                        setPaperOrder(mode.order)
+                      },
+                    },
+                    SEARCH_MODES.map((mode) => h('option', { key: mode.value, value: mode.value }, mode.label)),
+                  ),
+                  h('input', {
+                    type: 'text',
+                    className: 'dr-input',
+                    value: paperYear,
+                    placeholder: '年份（可留空）',
+                    maxLength: 4,
+                    'aria-label': '年份',
+                    onChange: (event) => setPaperYear(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') runPaperSearch()
+                    },
+                  }),
+                ),
+                h(
+                  'div',
+                  { className: 'dr-import-row' },
+                  h('input', {
+                    type: 'text',
+                    className: 'dr-input',
+                    value: paperQuery,
+                    placeholder: '论文题目、主题词或关键词',
+                    'aria-label': '论文搜索词',
+                    onChange: (event) => setPaperQuery(event.target.value),
+                    onKeyDown: (event) => {
+                      if (event.key === 'Enter') runPaperSearch()
+                    },
+                  }),
+                  h(
+                    'button',
+                    { type: 'button', className: 'dr-btn dr-btn-primary', disabled: paperBusy, onClick: runPaperSearch },
+                    paperBusy ? '正在搜…' : '搜索',
+                  ),
+                ),
+                paperError !== '' ? h('div', { className: 'dr-import-error' }, paperError) : null,
+                paperInfo !== '' ? h('div', { className: 'dr-import-hint' }, paperInfo) : null,
+                paperCollectInfo !== '' ? h('div', { className: 'dr-import-hint' }, paperCollectInfo) : null,
+                paperResults,
+              ),
             ),
           ),
         )
@@ -7994,6 +9098,7 @@ window.__ModuleLoader__.load({
         const [importing, setImporting] = useState(false)
         const [importError, setImportError] = useState('')
         const [reloadKey, setReloadKey] = useState(0)
+        const [paperAsk, setPaperAsk] = useState(null) // 导入后问「论文还是书」；null = 不问
         const [editing, setEditing] = useState(null) // 正在编辑的书；null = 弹窗关着
         const [importOpen, setImportOpen] = useState(false) // 「导入」面板（0.5.1）
         const [legadoOpen, setLegadoOpen] = useState(false) // 书源面板：搜书、加书（0.9.0）
@@ -8069,7 +9174,14 @@ window.__ModuleLoader__.load({
               const result = await call('shelf.import', { filename: file.name, dataBase64 })
               const bookHash = result && result.bookHash
               if (typeof bookHash === 'string' && bookHash !== '') {
-                if (typeof props.onImported === 'function') {
+                const hint = result?.meta?.pdfPaperHint
+                // 用户已经自己选过版式（pdfLayoutByUser）就别再问第二遍：重复导入同一本
+                // 文件时，meta 里的线索仍然为真，再弹一次会像坏掉了。
+                if (hint && hint.looksLikePaper === true && result?.meta?.pdfLayoutByUser !== true) {
+                  // 像论文就先问一句，别自己替他决定排版。
+                  setImportOpen(false)
+                  setPaperAsk({ bookHash, hint })
+                } else if (typeof props.onImported === 'function') {
                   props.onImported(bookHash)
                 } else {
                   reload()
@@ -8097,7 +9209,14 @@ window.__ModuleLoader__.load({
               const bookHash = result && result.bookHash
               setImportOpen(false)
               setNotice('已加入书架')
-              if (typeof bookHash === 'string' && bookHash !== '' && typeof props.onImported === 'function') {
+              const hint = result?.meta?.pdfPaperHint
+              if (
+                hint && hint.looksLikePaper === true
+                && result?.meta?.pdfLayoutByUser !== true
+                && typeof bookHash === 'string' && bookHash !== ''
+              ) {
+                setPaperAsk({ bookHash, hint })
+              } else if (typeof bookHash === 'string' && bookHash !== '' && typeof props.onImported === 'function') {
                 props.onImported(bookHash)
               } else {
                 reload()
@@ -8299,6 +9418,23 @@ window.__ModuleLoader__.load({
                 },
               },
               h(BookCard, { book, onOpen: props.onOpen }),
+              // 可见的「书籍信息」入口：右键是老用户的习惯，但触屏上根本没有右键，
+              // 「读书蒸馏」也只挂在这个弹窗里。常显一个小按钮，别再藏。
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-iconbtn dr-cell-tools',
+                  title: '书籍信息与工具（改名、封面、版式、读书蒸馏）',
+                  'aria-label': `打开《${book.title || '未命名'}》的信息与工具`,
+                  style: { position: 'absolute', top: 14, right: 52 },
+                  onClick: (event) => {
+                    event.stopPropagation()
+                    onEdit(book)
+                  },
+                },
+                '⋯',
+              ),
               h(
                 'button',
                 {
@@ -8314,6 +9450,25 @@ window.__ModuleLoader__.load({
                 },
                 '×',
               ),
+              // 「笔记 N」角标：这本书已经写进 Obsidian 的读书笔记有几段。
+              // 它是格子里的兄弟按钮而不是卡片里的子节点 —— 卡片本身是个 <button>，
+              // 里面再套按钮就是非法嵌套，点起来也会连带触发打开书。
+              typeof props.onNotes === 'function' && typeof book.notesCount === 'number' && book.notesCount > 0
+                ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dr-notes-chip',
+                    title: `已写进 Obsidian 读书笔记 ${book.notesCount} 段，点开查看`,
+                    'aria-label': `查看《${book.title || '未命名'}》的读书笔记，${book.notesCount} 段`,
+                    onClick: (event) => {
+                      event.stopPropagation()
+                      props.onNotes(book.bookHash)
+                    },
+                  },
+                  `笔记 ${book.notesCount > 99 ? '99+' : book.notesCount}`,
+                )
+                : null,
             )),
           )
         }
@@ -8338,6 +9493,31 @@ window.__ModuleLoader__.load({
                 onPickFile(event)
               },
               onImportUrl,
+              // 知网文献集存好之后：面板不关，但书架立刻刷新，新书马上出现。
+              onCollected: () => {
+                reload()
+                setNotice('已存成文献集')
+              },
+            })
+            : null,
+          paperAsk
+            ? h(LayoutPrompt, {
+              bookHash: paperAsk.bookHash,
+              hint: paperAsk.hint,
+              onChosen: (layout) => {
+                const target = paperAsk.bookHash
+                setPaperAsk(null)
+                setNotice(layout === 'paper' ? '已按论文排版' : '已按普通书排版')
+                if (typeof props.onImported === 'function') props.onImported(target)
+                else reload()
+              },
+              // 「先不选」：关掉询问，按现状打开这本书，不重排、不动进度。
+              onCancel: () => {
+                const target = paperAsk.bookHash
+                setPaperAsk(null)
+                if (typeof props.onImported === 'function') props.onImported(target)
+                else reload()
+              },
             })
             : null,
           editing
@@ -8345,6 +9525,12 @@ window.__ModuleLoader__.load({
               book: editing,
               onCancel: onEditCancel,
               onSaved: onEditSaved,
+              // 读书蒸馏现在从书架走：先关掉信息弹窗，再交给上层打开这本书的蒸馏面板。
+              // 弹窗不关就切屏，回来时会看见一个半透明的残留框。
+              onDistill: (hash) => {
+                onEditCancel()
+                if (typeof props.onDistill === 'function') props.onDistill(hash)
+              },
             })
             : null,
           h(LegadoPanel, {
@@ -8836,6 +10022,772 @@ window.__ModuleLoader__.load({
       return { chapterStatusText: chapterStatusText, distillSummary: distillSummary, exportFilename: exportFilename, downloadMarkdown: downloadMarkdown, DistillPanel: DistillPanel }
     })()
 
+    // ─── client/src/notes.js ───
+    var __mod_notes_js = (function () {
+      /**
+       * notes.js —— 「读书笔记」侧栏：把这本书的笔记写进 Obsidian 库。
+       *
+       * 它做的事（和它故意不做的事）：
+       *
+       *   · **做**：把宿主已经算好的两份笔记落成一个文件夹里的两个 Markdown——
+       *     「00 全书地图」和「01 读书笔记」，逐章分小节，把蒸馏要点、我的划线批注、
+       *     问 AI 的讨论记录按章归位；已经写过的块跳过，重复同步不产生任何改动。
+       *   · **不做**：不在浏览器里拼 Markdown。组块、核对指纹、判断「这段是用户自己改的」
+       *     全在宿主侧（lib/notesync.js），这里只负责把结果说人话、给按钮。
+       *   · **硬规矩**：块外面的内容是用户的地盘，我们一个字都不碰；块里面用户改过就
+       *     不覆盖、只在侧栏说「有 N 处你改过，没动」。笔记不是发布物，宁可少写不能写错。
+       *
+       * 空态是有意义的：没配库时不该假装功能存在，直接说「去设置里选一个库」。
+       */
+
+      /** 「00 全书地图 / 01 读书笔记」这类条目的中文名。 */
+      const KIND_LABEL = {
+        map: '全书地图',
+        note: '读书笔记',
+        relations: '人物关系',
+      }
+
+      /** 一份文件的状态文案：「还没生成」「已同步 · 12 个块」。 */
+      function fileStatusText(item) {
+        if (!item || typeof item !== 'object') return { text: '没同步', tone: 'idle' }
+        const blocks = Number.isFinite(item.blocks) ? item.blocks : 0
+        if (item.exists !== true) return { text: '还没生成', tone: 'idle' }
+        if (blocks === 0) return { text: '空文件', tone: 'idle' }
+        const written = Number.isFinite(item.written) ? item.written : 0
+        if (written < blocks) return { text: '写过 ' + written + ' / ' + blocks + ' 块', tone: 'idle' }
+        return { text: '已同步 · ' + blocks + ' 个块', tone: 'ok' }
+      }
+
+      /**
+       * 在 Obsidian 里打开某个文件的 URL。
+       *
+       * 宿主侧 notes.sync 也会回一份同样的 openUrl；这里再算一次是为了「已经同步过、
+       * 只想打开看看」也能用，不必为了拿个链接去重跑一次同步。
+       * vault 参数是库根目录的绝对路径，Obsidian 的 vault 名就是它最后一段。
+       */
+      function obsidianUrl(vault, relPath) {
+        const root = String(vault || '').replace(/[\\/]+$/, '')
+        const name = root.split(/[\\/]/).pop() || ''
+        const file = String(relPath || '')
+        if (name === '' || file === '') return ''
+        return 'obsidian://open?vault=' + encodeURIComponent(name) + '&file=' + encodeURIComponent(file)
+      }
+
+      /** 一句话概括这本书的笔记现状，给侧栏头用。 */
+      function notesSummary(status) {
+        const items = status && Array.isArray(status.items) ? status.items : []
+        const ready = items.filter((item) => item && item.exists === true)
+        const total = items.reduce((sum, item) => sum + (Number.isFinite(item && item.blocks) ? item.blocks : 0), 0)
+        const written = items.reduce((sum, item) => sum + (Number.isFinite(item && item.written) ? item.written : 0), 0)
+        return {
+          configured: !!(status && status.configured),
+          files: items.length,
+          ready: ready.length,
+          blocks: total,
+          written,
+          pending: Math.max(0, total - written),
+          conflicted: Number.isFinite(status && status.conflicted) ? status.conflicted : 0,
+          skippedQa: Number.isFinite(status && status.skippedQa) ? status.skippedQa : 0,
+        }
+      }
+
+      /** 上次同步时间的相对说法。时间戳读不出来就原样不显示，别显示 NaN。 */
+      function syncedText(iso) {
+        if (typeof iso !== 'string' || iso === '') return ''
+        const ms = Date.parse(iso)
+        if (!Number.isFinite(ms)) return ''
+        const diff = Date.now() - ms
+        if (diff < 0) return '刚刚'
+        const minute = 60 * 1000
+        if (diff < minute) return '刚刚'
+        if (diff < 60 * minute) return Math.floor(diff / minute) + ' 分钟前'
+        if (diff < 24 * 60 * minute) return Math.floor(diff / (60 * minute)) + ' 小时前'
+        if (diff < 30 * 24 * 60 * minute) return Math.floor(diff / (24 * 60 * minute)) + ' 天前'
+        return iso.slice(0, 10)
+      }
+
+      /**
+       * 「这条问答写进 Obsidian 了吗」——问 AI 面板底下一句话（L0 自动归位）。
+       *
+       * 宿主在 qa.ask 的返回里塞了 obsidian 字段：写完是 {written, files, ...}，
+       * 没开/没配是 {skipped:true, reason}，出错是 {error}。三种都不该阻断问答，
+       * 所以这里只负责说人话：
+       *
+       *   · 没开这个功能、没选库 —— 一个字都不说。用户没开的功能不该每次问完都提醒；
+       *   · 写进去了 —— 说写了，并且手改过的段落要交代清楚（没动就是没动）；
+       *   · 出错 —— 原样带上宿主给的短句，别吞掉原因，也别吓唬人。
+       */
+      function autowriteText(obsidian) {
+        if (!obsidian || typeof obsidian !== 'object') return ''
+        const error = typeof obsidian.error === 'string' ? obsidian.error.trim() : ''
+        if (error !== '') return '这条没写进 Obsidian：' + error
+        if (obsidian.skipped === true) return ''
+        const written = Number.isFinite(obsidian.written) ? obsidian.written : 0
+        const conflicts = Number.isFinite(obsidian.conflicts) ? obsidian.conflicts : 0
+        if (written > 0) {
+          return conflicts > 0
+            ? '已写进 Obsidian 的读书笔记（' + conflicts + ' 处你改过，没动）'
+            : '已写进 Obsidian 的读书笔记'
+        }
+        if (conflicts > 0) return '这条对应的段落你改过，没动它'
+        return 'Obsidian 里的读书笔记已经是最新的'
+      }
+
+      /**
+       * 「这位读者」那两行字（docs/26 §6.4）。
+       *
+       * 三条规矩，全都来自「用户是 IT 小白」这一条：
+       *   · 不解释「什么是画像」，只说这本书问过什么、因此笔记会怎么写；
+       *   · 没问过就说「还没问过」，绝不显示「0 个问题」；
+       *   · 关掉个性化时整段不出现 —— 用户关掉的功能不该在界面上继续占位置。
+       *
+       * @returns {{head:string, tail:string, empty:boolean} | null}
+       */
+      function profileText(state) {
+        if (!state || typeof state !== 'object') return null
+        if (state.enabled === false) return null
+        const asked = Number.isFinite(state.askedCount) ? state.askedCount : 0
+        if (asked <= 0) {
+          return { head: '还没问过这本书', tail: '问过几句之后，笔记会自动照着你的问法写。', empty: true }
+        }
+        const sentence = state.sentence && typeof state.sentence === 'object' ? state.sentence : null
+        const head = sentence && typeof sentence.head === 'string' ? sentence.head : '这本书你问过 ' + asked + ' 个问题。'
+        const tail = sentence && typeof sentence.tail === 'string' ? sentence.tail : ''
+        return { head, tail, empty: false }
+      }
+
+      /**
+       * 画像卡片：两行字 + 两个按钮。
+       *
+       * 「重新分析」是 docs/26 §6.5 的第三条对策：画像会自我强化，用户需要一个
+       * 「我不认同，重来一遍」的出口，而不是只能删文件。
+       * 「关掉」直接改设置，改完这张卡就消失 —— 不做二次确认，因为它随时能开回来。
+       */
+      function ProfileCard(props) {
+        const view = profileText(props.profile)
+        if (!view) return null
+        const busy = props.profileBusy === true
+        return h(
+          'div',
+          { className: 'dr-profile dr-profile-' + (view.empty ? 'empty' : 'ready') },
+          h('div', { className: 'dr-profile-head' },
+            h('span', { className: 'dr-profile-title' }, '这本书你问过什么'),
+            h('div', { className: 'dr-grow' }),
+            h('button', {
+              type: 'button',
+              className: 'dr-linkbtn',
+              disabled: busy,
+              title: '按现在的问答记录重新算一遍',
+              onClick: typeof props.onProfileRebuild === 'function' ? () => props.onProfileRebuild() : undefined,
+            }, busy ? '重算中…' : '重新分析'),
+            h('button', {
+              type: 'button',
+              className: 'dr-linkbtn',
+              disabled: busy,
+              title: '关掉之后，笔记按通用口径写',
+              onClick: typeof props.onProfileOff === 'function' ? () => props.onProfileOff() : undefined,
+            }, '关掉')),
+          h('div', { className: 'dr-profile-line' }, view.head),
+          view.tail !== '' ? h('div', { className: 'dr-profile-sub' }, view.tail) : null,
+        )
+      }
+
+      function FileRow(item, props) {
+        const kind = item && typeof item.kind === 'string' ? item.kind : ''
+        const label = KIND_LABEL[kind] || kind || '笔记'
+        const status = fileStatusText(item)
+        const relPath = item && typeof item.relPath === 'string' ? item.relPath : ''
+        const synced = item ? syncedText(item.syncedAt) : ''
+        const busy = typeof props.busy === 'string' && props.busy !== ''
+        return h(
+          'div',
+          { key: kind, className: 'dr-notes-row dr-notes-row-' + status.tone },
+          h('div',
+            { className: 'dr-notes-row-head' },
+            h('span', { className: 'dr-notes-row-label', title: relPath }, label),
+            h('span', { className: 'dr-notes-badge' }, status.text)),
+          h('div', { className: 'dr-notes-path', title: relPath }, relPath),
+          h('div', { className: 'dr-notes-row-foot' },
+            synced !== '' ? h('span', { className: 'dr-notes-time' }, '上次写：' + synced) : null,
+            h('div', { className: 'dr-grow' }),
+            item && item.exists === true
+              ? h('button', {
+                type: 'button',
+                className: 'dr-btn dr-btn-sm dr-btn-quiet',
+                disabled: busy,
+                title: '在 Obsidian 里打开这份笔记',
+                onClick: typeof props.onOpen === 'function' ? () => props.onOpen(kind) : undefined,
+              }, '在 Obsidian 打开')
+              : null,
+            h('button', {
+              type: 'button',
+              className: 'dr-btn dr-btn-sm dr-btn-quiet',
+              disabled: busy,
+              title: '只看会写成什么，不落盘',
+              onClick: typeof props.onPreview === 'function' ? () => props.onPreview(kind) : undefined,
+            }, '预览'),
+            h('button', {
+              type: 'button',
+              className: 'dr-btn dr-btn-sm',
+              disabled: busy,
+              title: '把这一份写进 Obsidian 库（已有的块会跳过）',
+              onClick: typeof props.onSync === 'function' ? () => props.onSync([kind]) : undefined,
+            }, busy === kind ? '写入中…' : '写入')));
+      }
+
+      /**
+       * 「人物关系」卡片（0.13.0 P5）。
+       *
+       * 这一段存在的理由：抽人物关系是这本书里唯一**要跑好几批**的动作，
+       * 用户看不到进度就会以为卡死，然后反复点。所以这里三样都要有：
+       * 现在跑到哪、这一批抽到几条、还剩几批。
+       */
+      function RelationsCard(props) {
+        const state = props.relations && typeof props.relations === 'object' ? props.relations : null
+        if (!state) return null
+        const action = relationsActionText(state)
+        const busy = props.busy === true
+        const progress = state.progress && typeof state.progress === 'object' ? state.progress : {}
+        const total = Number.isFinite(progress.total) ? progress.total : 0
+        const done = Number.isFinite(progress.done) ? progress.done : 0
+        const failed = Number.isFinite(progress.failed) ? progress.failed : 0
+        const persons = Array.isArray(state.persons) ? state.persons : []
+        const edges = Array.isArray(state.edges) ? state.edges : []
+        const names = persons.slice(0, 8).map((item) => String(item && item.name ? item.name : '')).filter((name) => name !== '')
+
+        // 一句话交代它是怎么来的。不解释算法，只说「每条都要在原文里找到那句话」——
+        // 用户信不过的从来不是模型慢，是怕它编。
+        const hint = total === 0
+          ? '只在小说上做：看前 ' + (Number.isFinite(state.sourceChapters) ? state.sourceChapters : 24) + ' 章里的人名和关系，每条都必须在原文里找到对应那句话。'
+          : '已跑 ' + (done + failed) + ' / ' + total + ' 批'
+            + (Number.isFinite(progress.dropped) && progress.dropped > 0 ? '，丢掉 ' + progress.dropped + ' 条原句核不上的' : '')
+            + '。'
+        const notice = typeof props.notice === 'string' ? props.notice : ''
+
+        return h(
+          'div',
+          { className: 'dr-profile dr-relations' },
+          h('div', { className: 'dr-profile-head' },
+            h('span', { className: 'dr-profile-title' }, '人物关系'),
+            h('div', { className: 'dr-grow' }),
+            total > 0 || edges.length > 0
+              ? h('span', { className: 'dr-head-sub' }, persons.length + ' 人 · ' + edges.length + ' 条')
+              : null),
+          h('div', { className: 'dr-profile-line' }, hint),
+          names.length > 0
+            ? h('div', { className: 'dr-profile-sub' }, names.join('、') + (persons.length > names.length ? ' 等' : ''))
+            : null,
+          notice !== '' ? h('div', { className: 'dr-notes-notice' }, notice) : null,
+          action.why !== '' ? h('div', { className: 'dr-profile-sub' }, action.why) : null,
+          h('div', { className: 'dr-notes-actions' },
+            h('button', {
+              type: 'button',
+              className: 'dr-btn dr-btn-sm dr-btn-primary',
+              disabled: busy || action.disabled === true,
+              title: '一批一批抽，每批都会回原文核对',
+              onClick: typeof props.onBuild === 'function' ? () => props.onBuild() : undefined,
+            }, busy ? '抽这一批…' : action.text),
+            total > 0
+              ? h('button', {
+                type: 'button',
+                className: 'dr-btn dr-btn-sm dr-btn-quiet',
+                disabled: busy,
+                title: '清空重来（已抽到的人名和关系都会丢掉）',
+                onClick: typeof props.onClear === 'function' ? () => props.onClear() : undefined,
+              }, '清空')
+              : null,
+            total > 0 && typeof props.onSync === 'function'
+              ? h('button', {
+                type: 'button',
+                className: 'dr-btn dr-btn-sm dr-btn-quiet',
+                disabled: busy || typeof props.busyKind === 'string' && props.busyKind !== '',
+                title: '把关系图写进 Obsidian（02 人物关系）',
+                onClick: () => props.onSync(['relations']),
+              }, '写进笔记')
+              : null),
+        )
+      }
+
+      /**
+       * 「跨书主题」卡片（0.13.0 P5 第二半）。
+       *
+       * 门槛是高的、候选是少的，这是故意的：误报一个主题页，用户下次就不看了。
+       * 所以这里连「为什么只有这么几条」都不解释——列表短本身就是答案。
+       */
+      function ThreadsCard(props) {
+        const data = props.threads && typeof props.threads === 'object' ? props.threads : null
+        if (!data) return null
+        const candidates = Array.isArray(data.candidates) ? data.candidates : []
+        const standing = Array.isArray(data.standing) ? data.standing : []
+        const scanned = data.scanned && typeof data.scanned === 'object' ? data.scanned : {}
+        const busy = typeof props.busy === 'string' ? props.busy : ''
+        const notice = typeof props.notice === 'string' ? props.notice : ''
+        const vaultError = typeof data.vaultError === 'string' ? data.vaultError : ''
+
+        return h(
+          'div',
+          { className: 'dr-profile dr-threads' },
+          h('div', { className: 'dr-profile-head' },
+            h('span', { className: 'dr-profile-title' }, '跨书主题'),
+            h('div', { className: 'dr-grow' }),
+            h('span', { className: 'dr-head-sub' },
+              (Number.isFinite(scanned.books) ? scanned.books : 0) + ' 本 · '
+              + (Number.isFinite(scanned.blocks) ? scanned.blocks : 0) + ' 段讨论')),
+          h('div', { className: 'dr-profile-line' },
+            candidates.length === 0
+              ? '同一件事在两本书里都问过，才会出现在这里。现在还没有。'
+              : '这些词在两本书以上都出现过。立成主题会建一页，把各本书里的说法并排放。'),
+          vaultError !== '' ? h('div', { className: 'dr-notes-warn' }, vaultError) : null,
+          notice !== '' ? h('div', { className: 'dr-notes-notice' }, notice) : null,
+          standing.length > 0
+            ? h('div', { className: 'dr-notes-row-foot' },
+              h('span', { className: 'dr-notes-time' }, '已立 ' + standing.length + ' 个主题'),
+              h('div', { className: 'dr-grow' }),
+              typeof props.onOpenIndex === 'function'
+                ? h('button', {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-sm dr-btn-quiet',
+                  title: '在 Obsidian 里打开主题总览',
+                  onClick: () => props.onOpenIndex(),
+                }, '看总览')
+                : null)
+            : null,
+          candidates.length > 0
+            ? h('div', { className: 'dr-notes-list' }, candidates.map((item) => {
+              const term = String(item && item.term ? item.term : '')
+              const already = item && item.already === true
+              return h('div', { key: term, className: 'dr-notes-row dr-notes-row-ok' },
+                h('div', { className: 'dr-notes-row-head' },
+                  h('span', { className: 'dr-notes-row-label' }, term),
+                  already ? h('span', { className: 'dr-notes-badge' }, '已立') : null),
+                h('div', { className: 'dr-notes-path' }, candidateText(item)),
+                h('div', { className: 'dr-notes-row-foot' },
+                  h('div', { className: 'dr-grow' }),
+                  h('button', {
+                    type: 'button',
+                    className: 'dr-btn dr-btn-sm' + (already ? ' dr-btn-quiet' : ''),
+                    disabled: busy !== '' || data.configured !== true,
+                    title: data.configured === true ? '建一页主题笔记' : '先去设置里选 Obsidian 库',
+                    onClick: typeof props.onBuild === 'function' ? () => props.onBuild(term) : undefined,
+                  }, busy === term ? '写着…' : already ? '更新' : '立成主题'))
+              )
+            }))
+            : null,
+        )
+      }
+      /**
+       * 「我写过什么」卡片（0.13.0 P6）。
+       *
+       * 这一张跟上面几张不同：上面都是「程序要写给你什么」，这一张是**你自己**在 Obsidian
+       * 里已经攒下的东西。所以：
+       *   · 一个字都不改、一个按钮都不给写 —— 只列文件名与一二级小标题，点一下在 Obsidian 里打开；
+       *   · 没有页就不出现 —— 面板下面那份「还没生成」的清单已经说了这件事，再说一遍是噪音；
+       *   · 程序写的 `## 第三章` 不算你写的 —— 每行带 `own`，只有自己写的标题才计入「N 条」。
+       *
+       * 只读标题这件事是硬约束（docs/26 §十末尾）：正文既没有从宿主传过来，也没有地方存，
+       * 所以这里不可能「顺手把笔记喂给模型」。
+       */
+
+      /** 一页最多先摊开几条小标题；再多就折起来，侧栏会变成一堵墙。 */
+      const MINE_HEADING_LIMIT = 6
+
+      function MyNotesRow(file, props) {
+        const name = String(file && file.name ? file.name : '')
+        const headings = Array.isArray(file && file.headings) ? file.headings : []
+        const ownCount = Number.isFinite(file && file.ownCount) ? file.ownCount : 0
+        const shown = headings.slice(0, MINE_HEADING_LIMIT)
+        const rest = headings.length - shown.length
+        const openUrl = typeof (file && file.openUrl) === 'string' && file.openUrl !== ''
+          ? file.openUrl
+          : obsidianUrl(props.vault, file && file.relPath)
+        return h('div', { key: file && file.relPath ? file.relPath : name, className: 'dr-notes-row dr-notes-row-ok' },
+          h('div', { className: 'dr-notes-row-head' },
+            h('span', { className: 'dr-notes-row-label', title: String(file && file.relPath ? file.relPath : '') }, name),
+            ownCount > 0 ? h('span', { className: 'dr-notes-badge' }, ownCount + ' 条') : null),
+          shown.length > 0
+            ? h('div', { className: 'dr-notes-path' }, shown.map((item) => {
+              // 程序写的小节用「·」标出来：不解释，但一眼能看出哪几行是自己起的标题。
+              const text = (item && item.own === false ? '· ' : '') + String(item && item.text ? item.text : '')
+              return h('div', { key: String(item && item.line) + text }, text)
+            }))
+            : h('div', { className: 'dr-notes-path' }, '这一页没有小标题。'),
+          rest > 0 ? h('div', { className: 'dr-notes-path' }, '还有 ' + rest + ' 条…') : null,
+          h('div', { className: 'dr-notes-row-foot' },
+            h('div', { className: 'dr-grow' }),
+            openUrl !== ''
+              ? h('a', {
+                className: 'dr-linkbtn',
+                href: openUrl,
+                title: '在 Obsidian 里打开这一页',
+                rel: 'noreferrer',
+              }, '打开')
+              : null),
+        )
+      }
+
+      /**
+       * 卡片本体。
+       *
+       * @param {object} props
+       * @param {object|null} props.mine  notes.mine 的返回
+       */
+      function MyNotesCard(props) {
+        const data = props.mine && typeof props.mine === 'object' ? props.mine : null
+        if (!data) return null
+        if (data.configured !== true) return null
+        const files = Array.isArray(data.files) ? data.files : []
+        const vaultError = typeof data.vaultError === 'string' ? data.vaultError : ''
+        // 库打不开时上面那张 warn 已经说过了，这里不重复；没有页就整张不出现。
+        if (files.length === 0) return null
+        const skipped = Number.isFinite(data.skipped) ? data.skipped : 0
+        const total = files.reduce((sum, file) => sum + (Number.isFinite(file && file.ownCount) ? file.ownCount : 0), 0)
+
+        return h('div', { className: 'dr-profile dr-mine' },
+          h('div', { className: 'dr-profile-head' },
+            h('span', { className: 'dr-profile-title' }, '我写过什么'),
+            h('div', { className: 'dr-grow' }),
+            h('span', { className: 'dr-head-sub' }, files.length + ' 页 · ' + total + ' 条标题')),
+          h('div', { className: 'dr-profile-line' },
+            '这个文件夹里已经有这些页。我只读标题，正文一个字都不碰。'),
+          h('div', { className: 'dr-notes-list' }, files.map((file) => MyNotesRow(file, { vault: data.vault }))),
+          skipped > 0
+            ? h('div', { className: 'dr-notes-pending' }, '这个文件夹里还有 ' + skipped + ' 页没列出来——先列前面这些。')
+            : null,
+        )
+      }
+      /**
+       * 面板本体。
+       *
+       * @param {object} props
+       * @param {object|null} props.status    notes.status 的返回
+       * @param {boolean} props.loading
+       * @param {string}  props.error
+       * @param {string}  props.busy          正在写的那一类（'map' / 'note' / 'all'）
+       * @param {string}  props.notice        一句成功提示（写了几块 / 全是最新的）
+       * @param {object|null} props.preview   notes.preview 的返回
+       * @param {object|null} props.profile   profile.get 的返回（读者画像，可能为 null）
+       * @param {object|null} props.relations relations.get 的返回（人物关系，可能为 null）
+       * @param {object|null} props.threads   thread.list 的返回（跨书主题，可能为 null）
+       * @param {object|null} props.mine      notes.mine 的返回（我写过什么，可能为 null）
+       * @param {Function} props.onMineReload  () => void  重读「我写过什么」
+       * @param {boolean} props.relationsBusy 正在抽这一批
+       * @param {string}  props.relationsNotice 上一批抽完的交代
+       * @param {Function} props.onRelationsBuild () => void
+       * @param {Function} props.onRelationsClear () => void
+       * @param {Function} props.onThreadBuild (term) => void
+       * @param {Function} props.onThreadReload  () => void
+       * @param {Function} props.onOpenIndex    () => void  打开主题总览
+       * @param {boolean} props.profileBusy   正在重算画像
+       * @param {Function} props.onProfileRebuild () => void
+       * @param {Function} props.onProfileOff     () => void
+       * @param {Function} props.onSync       (kinds?) => void
+       * @param {Function} props.onPreview    (kind) => void
+       * @param {Function} props.onClosePreview
+       * @param {Function} props.onOpen       (kind) => void
+       * @param {Function} props.onReload
+       * @param {Function} props.onOpenSettings
+       */
+      function NotesPanel(props) {
+        const status = props.status && typeof props.status === 'object' ? props.status : null
+        const summary = notesSummary(status)
+        const busy = typeof props.busy === 'string' ? props.busy : ''
+        const items = status && Array.isArray(status.items) ? status.items : []
+
+        const head = h(
+          'div',
+          { className: 'dr-side-head' },
+          h('span', null, '读书笔记'),
+          h('div', { className: 'dr-grow' }),
+          h('span', { className: 'dr-head-sub' },
+            summary.configured ? summary.written + ' / ' + summary.blocks + ' 块' : '未连接库'))
+
+        if (props.error) {
+          return h('div', { className: 'dr-notes-panel' }, head,
+            h('div', { className: 'dr-state dr-error' },
+              h('div', { className: 'dr-state-title' }, '笔记面板打不开'),
+              h('div', { className: 'dr-state-text' }, props.error)))
+        }
+
+        if (props.loading === true && status === null) {
+          return h('div', { className: 'dr-notes-panel' }, head,
+            h('div', { className: 'dr-state' },
+              h('div', { className: 'dr-spinner', role: 'status', 'aria-label': '正在读取笔记状态' }),
+              h('div', { className: 'dr-state-text' }, '正在读取…')))
+        }
+
+        // 没配库：功能确实还没成立，不要给一个点了会报错的按钮。
+        if (status === null || summary.configured !== true) {
+          return h('div', { className: 'dr-notes-panel' }, head,
+            h('div', { className: 'dr-state' },
+              h('div', { className: 'dr-state-title' }, '还没连上 Obsidian'),
+              h('div', { className: 'dr-state-text' },
+                '选一个 Obsidian 库，这本书的笔记就会写进里面的 dsh-reading 文件夹。'),
+              typeof props.onOpenSettings === 'function'
+                ? h('div', { className: 'dr-state-actions' },
+                  h('button', {
+                    type: 'button',
+                    className: 'dr-btn dr-btn-sm dr-btn-primary',
+                    onClick: () => props.onOpenSettings(),
+                  }, '去设置里选库'))
+                : null))
+        }
+
+        const preview = props.preview && typeof props.preview === 'object' ? props.preview : null
+        const vaultError = typeof status.vaultError === 'string' ? status.vaultError : ''
+
+        return h(
+          'div',
+          { className: 'dr-notes-panel' },
+          head,
+          vaultError !== ''
+            ? h('div', { className: 'dr-notes-warn' }, vaultError)
+            : null,
+          ProfileCard(props),
+          // 「我写过什么」紧跟着画像：两张都在回答「这本书里的你」，
+           // 一张讲你问过什么，一张讲你写过什么。
+          MyNotesCard(props),
+          // 两张卡各读自己的短名（onBuild / onClear / notice），这里显式搬一次：
+          // 直接把 props 原样递进去，按钮会点上没反应（名字对不上）。
+          RelationsCard({
+            relations: props.relations,
+            busy: props.relationsBusy === true,
+            busyKind: busy,
+            notice: props.relationsNotice,
+            onBuild: props.onRelationsBuild,
+            onClear: props.onRelationsClear,
+            onSync: props.onSync,
+          }),
+          ThreadsCard({
+            threads: props.threads,
+            busy: props.threadBusy,
+            notice: props.threadNotice,
+            onBuild: props.onThreadBuild,
+            onOpenIndex: props.onOpenIndex,
+          }),
+          h('div', { className: 'dr-notes-head' },
+            h('div', { className: 'dr-notes-vault', title: status.vault },
+              '库：' + String(status.vault || '') ),
+            h('div', { className: 'dr-notes-actions' },
+              h('button', {
+                type: 'button',
+                className: 'dr-btn dr-btn-sm dr-btn-primary',
+                disabled: busy !== '' || vaultError !== '',
+                title: '把这两份都写进 Obsidian（已有的块会跳过）',
+                onClick: typeof props.onSync === 'function' ? () => props.onSync() : undefined,
+              }, busy === 'all' ? '写入中…' : '全部写入'),
+              h('button', {
+                type: 'button',
+                className: 'dr-btn dr-btn-sm',
+                disabled: busy !== '' || vaultError !== '',
+                title: '只重做全书地图，那个便宜',
+                onClick: typeof props.onSync === 'function' ? () => props.onSync(['map']) : undefined,
+              }, busy === 'map' ? '写入中…' : '只更新地图'),
+              h('button', {
+                type: 'button',
+                className: 'dr-btn dr-btn-sm dr-btn-quiet',
+                disabled: busy !== '',
+                onClick: () => {
+                  // 刷新一起刷：状态和「我写过什么」读的是同一批文件，
+                   // 只刷一半会让两张卡说的话对不上。
+                  if (typeof props.onReload === 'function') props.onReload()
+                  if (typeof props.onMineReload === 'function') props.onMineReload()
+                },
+              }, '刷新'))),
+          props.notice
+            ? h('div', { className: 'dr-notes-notice' }, props.notice)
+            : null,
+          preview
+            ? h('div', { className: 'dr-notes-preview' },
+              h('div', { className: 'dr-notes-preview-head' },
+                h('span', null, '预览 · ' + (KIND_LABEL[preview.kind] || preview.kind || '')),
+                h('div', { className: 'dr-grow' }),
+                h('button', {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-sm dr-btn-quiet',
+                  onClick: typeof props.onClosePreview === 'function' ? () => props.onClosePreview() : undefined,
+                }, '收起')),
+              h('div', { className: 'dr-notes-preview-path' }, String(preview.relPath || '')),
+              h('pre', { className: 'dr-notes-preview-text' }, String(preview.markdown || '')))
+            : null,
+          h('div', { className: 'dr-notes-list' }, items.map((item) => FileRow(item, props))),
+          h('div', { className: 'dr-notes-foot' },
+            h('div', null,
+              '笔记按章分小节：蒸馏要点、我的批注、问过的问题都在对应那一章下面。'),
+            summary.pending > 0
+              ? h('div', { className: 'dr-notes-pending' }, '还有 ' + summary.pending + ' 块没写进去，点上面的按钮同步。')
+              : null,
+            summary.conflicted > 0
+              ? h('div', { className: 'dr-notes-pending' }, '有 ' + summary.conflicted + ' 块你自己改过，我不会覆盖它们。')
+              : null,
+            summary.skippedQa > 0
+              ? h('div', { className: 'dr-notes-pending' }, '有 ' + summary.skippedQa + ' 条讨论没有章节位置，暂时没写进去。')
+              : null),
+        )
+      }
+
+      /**
+       * 「人物关系」那一段（0.13.0 P5）。
+       *
+       * 三条规矩，都来自「不能让用户觉得程序在瞎编」：
+       *   · 不是小说、也没开始抽 —— 说明理由，不给按钮。硬凑一张图比没有更糟；
+       *   · 每一批都要能看见进度 —— 一部长篇要跑好几批，中途看不见就以为卡死了；
+       *   · 关系图是 Mermaid 代码块，交给 Obsidian 渲染，这里不自己画。
+       */
+
+      /** 按钮上该写什么、能不能点。抽完了就不再给「继续抽」，免得用户一直点。 */
+      function relationsActionText(state) {
+        if (!state || typeof state !== 'object') return { text: '生成人物关系', disabled: true, why: '还没读到状态' }
+        const progress = state.progress && typeof state.progress === 'object' ? state.progress : {}
+        const total = Number.isFinite(progress.total) ? progress.total : 0
+        const done = Number.isFinite(progress.done) ? progress.done : 0
+        const failed = Number.isFinite(progress.failed) ? progress.failed : 0
+        const verdict = state.verdict && typeof state.verdict === 'object' ? state.verdict : {}
+
+        if (total === 0) {
+          if (verdict.fiction === false) {
+            return { text: '生成人物关系', disabled: true, why: String(verdict.reason || '这本书看起来不像小说') }
+          }
+          return { text: '开始抽人物关系', disabled: state.canBuild === false, why: '' }
+        }
+        if (done + failed >= total) {
+          return { text: '已抽完', disabled: true, why: '想重来就点「清空」' }
+        }
+        return { text: '继续抽下一批（' + (done + failed) + ' / ' + total + '）', disabled: state.canBuild === false, why: '' }
+      }
+
+      /** 关系图的 Mermaid 代码，从宿主给的正文里抠出来。抠不到就不显示图。 */
+      function relationsMermaid(markdown) {
+        const text = typeof markdown === 'string' ? markdown : ''
+        const match = /(?:^|\n)[ ]*```mermaid[ ]*\n([\s\S]*?)```/.exec(text)
+        return match ? match[1].trim() : ''
+      }
+
+      /** 这一批抽完的交代：抽到几条、丢掉几条（原句核不上的）。 */
+      function relationsNotice(result) {
+        if (!result || typeof result !== 'object') return ''
+        const batch = result.batch && typeof result.batch === 'object' ? result.batch : null
+        if (!batch) return ''
+        const kept = Number.isFinite(batch.kept) ? batch.kept : 0
+        const dropped = Number.isFinite(batch.dropped) ? batch.dropped : 0
+        const where = typeof batch.label === 'string' && batch.label !== '' ? batch.label + '：' : ''
+        if (kept === 0) {
+          return where + (dropped > 0
+            ? '没找到能在原文里核对上的关系（' + dropped + ' 条原句对不上，丢掉了）。'
+            : '这一批里没出现新的人物关系。')
+        }
+        return where + '抽到 ' + kept + ' 条关系' + (dropped > 0 ? '，另有 ' + dropped + ' 条原句核不上，丢掉了' : '') + '。'
+      }
+
+      /**
+       * 一条候选主题的一行字（0.13.0 P5 第二半）。
+       *
+       * 宿主已经算好 line 了，这里只在缺失时兜一句 —— 界面不该因为少一个字段就空着。
+       */
+      function candidateText(candidate) {
+        if (!candidate || typeof candidate !== 'object') return ''
+        if (typeof candidate.line === 'string' && candidate.line !== '') return candidate.line
+        const books = Number.isFinite(candidate.bookCount) ? candidate.bookCount : 0
+        const blocks = Number.isFinite(candidate.blockCount) ? candidate.blockCount : 0
+        return '出现在 ' + books + ' 本书、' + blocks + ' 段讨论'
+      }
+
+      return { fileStatusText: fileStatusText, obsidianUrl: obsidianUrl, notesSummary: notesSummary, syncedText: syncedText, autowriteText: autowriteText, profileText: profileText, MyNotesCard: MyNotesCard, NotesPanel: NotesPanel, relationsActionText: relationsActionText, relationsMermaid: relationsMermaid, relationsNotice: relationsNotice, candidateText: candidateText }
+    })()
+
+    // ─── client/src/reader-metrics.js ───
+    var __mod_reader_metrics_js = (function () {
+      /**
+       * 阅读器几何量：列宽、列高。
+       *
+       * 单独一个模块，是为了能被 node 直接 import 测 —— reader.js 里有 React 组件，
+       * 测试里 import 它会连带把半个应用拉进来。这里的两个函数是纯函数，给一对
+       * 「像 DOM 元素」的对象就能算出结果。
+       *
+       * 历史：这段逻辑原来写在 reader.js 的 geometry() 里，取「iframe 与外层视口」
+       * 多路测量的**最大**值。外层视口带上下各 40px 内边距（正文四周的留白），
+       * iframe 的 height:100% 只等于内容盒高度，于是「列高比 iframe 高 80px」，
+       * 每页最底下那一两行被裁在视口外面 —— 用户的原话是「最底下那行字还是会被遮住」。
+       * 列高必须取 iframe 自己的高度；只有量不到时才退回外层，并且要扣掉内边距。
+       */
+
+      /** 取元素的 client 尺寸（老引擎 / jsdom 里可能是 0）。 */
+      function clientSize(el) {
+        if (!el) return { width: 0, height: 0 }
+        return {
+          width: Math.max(0, Number(el.clientWidth) || 0),
+          height: Math.max(0, Number(el.clientHeight) || 0),
+        }
+      }
+
+      /** 取元素的 border-box 尺寸。 */
+      function rectSize(el) {
+        if (!el || typeof el.getBoundingClientRect !== 'function') return { width: 0, height: 0 }
+        const rect = el.getBoundingClientRect()
+        if (!rect) return { width: 0, height: 0 }
+        return { width: Math.max(0, Number(rect.width) || 0), height: Math.max(0, Number(rect.height) || 0) }
+      }
+
+      /** 取元素的内边距合计；拿不到样式就按 0 算。 */
+      function paddingOf(el) {
+        const view = el && el.ownerDocument ? el.ownerDocument.defaultView : null
+        if (!view || typeof view.getComputedStyle !== 'function') return { x: 0, y: 0 }
+        try {
+          const style = view.getComputedStyle(el)
+          const num = (value) => {
+            const parsed = parseFloat(value)
+            return Number.isFinite(parsed) ? parsed : 0
+          }
+          return {
+            x: num(style.paddingLeft) + num(style.paddingRight),
+            y: num(style.paddingTop) + num(style.paddingBottom),
+          }
+        } catch {
+          return { x: 0, y: 0 }
+        }
+      }
+
+      /**
+       * 算出「一列能装多高、多宽」。
+       *
+       * 优先级：iframe 自己的尺寸 → 外层视口扣掉内边距 → 上一次量到的好值。
+       * 绝不把外层高度直接当列高：那是含内边距的盒子，比 iframe 高。
+       *
+       * @param {object|null} frame   正文 iframe（或其替代元素）
+       * @param {object|null} viewport 外层视口（带内边距）
+       * @param {{ width?: number, height?: number }} [last] 上一次量到的好值
+       * @returns {{ width: number, height: number, fromFrame: boolean }}
+       */
+      function frameMetrics(frame, viewport, last = {}) {
+        const frameClient = clientSize(frame)
+        const frameRect = rectSize(frame)
+        // 有 clientHeight 就用它：那是 iframe 的内容盒高度，正是「一列」的高度。
+        let width = frameClient.width > 0 ? frameClient.width : frameRect.width
+        let height = frameClient.height > 0 ? frameClient.height : frameRect.height
+        const fromFrame = width >= 200 && height >= 200
+
+        if (!fromFrame) {
+          const pad = paddingOf(viewport)
+          const viewClient = clientSize(viewport)
+          const viewRect = rectSize(viewport)
+          const viewWidth = Math.max(viewClient.width, viewRect.width)
+          const viewHeight = Math.max(viewClient.height, viewRect.height)
+          if (width < 200) width = Math.max(0, viewWidth - pad.x)
+          if (height < 200) height = Math.max(0, viewHeight - pad.y)
+        }
+
+        if (width < 200 && Number(last.width) >= 200) width = Number(last.width)
+        if (height < 200 && Number(last.height) >= 200) height = Number(last.height)
+
+        return {
+          width: Math.max(0, Math.floor(width)),
+          height: Math.max(0, Math.floor(height)),
+          fromFrame,
+        }
+      }
+
+      return { frameMetrics: frameMetrics }
+    })()
+
     // ─── client/src/reader.js ───
     var __mod_reader_js = (function () {
       /**
@@ -8869,6 +10821,7 @@ window.__ModuleLoader__.load({
             const humanizeError = __mod_api_js.humanizeError
             const CFI = __mod_cfi_js
             const statusSummary = __mod_ai_js.statusSummary
+            const frameMetrics = __mod_reader_metrics_js.frameMetrics
 
       /**
        * 注入节点的标记。**从 cfi.js 取，不要另写字面量**：
@@ -9441,52 +11394,23 @@ window.__ModuleLoader__.load({
           : ''
 
         /**
-         * 把几何量算出来：列宽 = iframe 视口宽，间距固定。
+         * 把几何量算出来：列宽 = iframe 视口宽，列高 = iframe 视口高。
          *
-         * 这里量错一次就得整章重排，所以取多路测量的最大值：iframe 的 clientWidth、
-         * 它的 border-box 宽、外层视口宽。面板刚挂载（隐藏、宽度未落定）时前两者可能是 0，
-         * 外层视口往往已经有正确宽度；再兜一个「上一次量到的好值」，避免退化成 120px 的
-         * 窄条 —— 那正是「三个字一行、字只占屏幕左半边」的样子。
+         * 量错一次就得整章重排，所以量法有讲究（细节见 client/src/reader-metrics.js）：
+         * 优先用 iframe 自己的尺寸，量不到才退回外层视口并扣掉它的内边距。
+         * 外层是带留白的盒子，直接拿它的高度当列高，每页最后一行会被裁掉。
          */
         const geometry = useCallback(() => {
-          const frame = frameRef.current
-          const viewport = viewportRef.current
-          const candidates = []
-          if (frame) {
-            candidates.push(Number(frame.clientWidth) || 0)
-            const box = typeof frame.getBoundingClientRect === 'function' ? frame.getBoundingClientRect() : null
-            if (box) candidates.push(Number(box.width) || 0)
-          }
-          if (viewport) {
-            candidates.push(Number(viewport.clientWidth) || 0)
-            const vbox = typeof viewport.getBoundingClientRect === 'function' ? viewport.getBoundingClientRect() : null
-            if (vbox) candidates.push(Number(vbox.width) || 0)
-          }
-          let width = Math.floor(Math.max(0, ...candidates))
-          if (width < 200) {
-            const last = Number(lastWidthRef.current) || 0
-            if (last >= 200) width = last
-          }
+          // 量法本身在 client/src/reader-metrics.js，那边有注释与单测：
+          // 列高必须取 iframe 自己的高度，外层视口含上下内边距，直接拿来当列高
+          // 会让每页最后一行被裁在视口外面。
+          const measured = frameMetrics(frameRef.current, viewportRef.current, {
+            width: lastWidthRef.current,
+            height: lastHeightRef.current,
+          })
+          const width = measured.width
+          const height = measured.height
           if (width >= 200) lastWidthRef.current = width
-
-          // 高度同理：分页用的是「一列能装多高」，量不到高度时多栏退化成单栏，
-          // 读数会变成「这一章只有一页」—— 正文其实被排在首屏下面，永远翻不到。
-          const heightCandidates = []
-          if (frame) {
-            heightCandidates.push(Number(frame.clientHeight) || 0)
-            const box = typeof frame.getBoundingClientRect === 'function' ? frame.getBoundingClientRect() : null
-            if (box) heightCandidates.push(Number(box.height) || 0)
-          }
-          if (viewport) {
-            heightCandidates.push(Number(viewport.clientHeight) || 0)
-            const vbox = typeof viewport.getBoundingClientRect === 'function' ? viewport.getBoundingClientRect() : null
-            if (vbox) heightCandidates.push(Number(vbox.height) || 0)
-          }
-          let height = Math.floor(Math.max(0, ...heightCandidates))
-          if (height < 200) {
-            const last = Number(lastHeightRef.current) || 0
-            if (last >= 200) height = last
-          }
           if (height >= 200) lastHeightRef.current = height
 
           // 栏间距按视口宽度的比例算：48px 写死时，窄屏（约 600px）两栏之间空出一大条，
@@ -10557,22 +12481,24 @@ window.__ModuleLoader__.load({
               qaCount > 0 ? h('span', { className: 'dr-toc-badge' }, qaCount > 99 ? '99+' : String(qaCount)) : null,
             )
             : null,
-          // 读书蒸馏入口：常驻一个按钮，一次点击直达（有成果时带条数）
-          typeof props.onOpenDistill === 'function'
+          // 「笔记」：把这本书的蒸馏要点、我的批注、问过的讨论写进 Obsidian。
+          // 放在「问答」右边——它写的东西大半来自那些问答，两个按钮挨着才好理解。
+          typeof props.onToggleSide === 'function'
             ? h(
               'button',
               {
                 type: 'button',
-                className: 'dr-btn dr-btn-sm dr-distill-entry',
-                title: props.distillDone > 0 ? `读书蒸馏 · 已蒸 ${props.distillDone} 章` : '读书蒸馏：把这本书变成能带走的笔记',
-                'aria-label': '读书蒸馏',
-                'aria-pressed': props.sideKind === 'distill' ? 'true' : 'false',
-                onClick: props.onOpenDistill,
+                className: 'dr-iconbtn',
+                title: '读书笔记（写进 Obsidian）',
+                'aria-label': '读书笔记',
+                'aria-pressed': props.sideKind === 'companion' ? 'true' : 'false',
+                onClick: () => props.onToggleSide('companion'),
               },
-              '蒸馏',
-              props.distillDone > 0 ? h('span', { className: 'dr-toc-badge' }, String(props.distillDone)) : null,
+              '笔记',
             )
             : null,
+          // 读书蒸馏入口已经搬到书架：书卡上的「⋯」或右键打开信息弹窗，那里有「读书蒸馏」。
+          // 阅读器里不再常驻这个按钮——读的时候用不到，还占走一个工具栏位置。
           // AI 状态点：一眼看出「现在能不能用」。绿色可用、黄色最近失败、红色配置不通。
           // 点开是「AI 状态」面板——那里才有四道检查与最近调用账本。
           typeof props.onOpenAi === 'function'
@@ -10927,6 +12853,7 @@ window.__ModuleLoader__.load({
             const HIGHLIGHT_ORDER = __mod_style_js.HIGHLIGHT_ORDER
             const HIGHLIGHT_COLORS = __mod_style_js.HIGHLIGHT_COLORS
             const AiStatusChip = __mod_ai_js.AiStatusChip
+            const AiModelBar = __mod_ai_js.AiModelBar
             const CFI = __mod_cfi_js
             const fingerprint = __mod_contract_js.fingerprint
             const makeBookmark = __mod_contract_js.makeBookmark
@@ -11921,6 +13848,48 @@ window.__ModuleLoader__.load({
       }
 
       /**
+       * 「问 AI」的模式选择器（0.11.0）。
+       *
+       * 模式的**中文名与说明全在后端**（ask.presets）返回，这里只负责把
+       * id / name 摆成一个原生 <select>。为什么不硬编在客户端：文案随时可能改，
+       * 改一次要发一次包不划算。
+       *
+       * 没有 presets（还没拉到 / 后端没给）就整个不渲染——下拉消失，面板其余照常，
+       * 绝不因为一个选择器把整个面板搞白。选中的 id 不在清单里（含空串＝没选过）时
+       * 显示第一项：后端 ask.presets 的第一项就是它的默认模式（general），所以
+       * 显示的和真正发出去的始终是同一个。
+       */
+      function AskModeSelect(props) {
+        const presets = Array.isArray(props.presets)
+          ? props.presets.filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+          : []
+        if (presets.length === 0) return null
+        const mode = typeof props.mode === 'string' ? props.mode : ''
+        const selected = presets.some((item) => item.id === mode) ? mode : presets[0].id
+        return h(
+          'select',
+          {
+            className: 'dr-select dr-ask-mode',
+            // 头部这一行已经有标题、模型选择、轮次、状态点、关闭按钮，窄屏上再塞一个
+            // 不定宽的下拉就会挤出边界。给它一个上限，长模式名由浏览器自己截断；
+            // 不碰圆角与配色，外观仍走 .dr-select 那一套。
+            style: { minWidth: 0, maxWidth: '45%' },
+            title: '问 AI 模式',
+            'aria-label': '问 AI 模式',
+            value: selected,
+            onChange: (event) => {
+              if (typeof props.onChange === 'function') props.onChange(event.target.value)
+            },
+          },
+          presets.map((item) => h(
+            'option',
+            { key: item.id === '' ? 'default' : item.id, value: item.id, title: typeof item.description === 'string' ? item.description : '' },
+            item.name,
+          )),
+        )
+      }
+
+      /**
        * 「问 AI」面板：贴着屏幕底部滑出，带原文摘要 + 上下文 + 输入框 + 回答。
        *
        * 0.4.0 的精修点（用户原话「问 AI 的界面更精细一点」）：
@@ -12085,6 +14054,11 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'dr-ask-head' },
               h('span', { className: 'dr-ask-title' }, '问 AI'),
+              h(AskModeSelect, {
+                mode: props.mode,
+                presets: props.presets,
+                onChange: props.onModeChange,
+              }),
               h(AiModelBar, { compact: true, label: '分析模型' }),
               round >= 2 ? h('span', { className: 'dr-chip dr-ask-round' }, `第 ${round} 轮`) : null,
               // AI 状态点：失败前就能看出「现在根本连不上」，不用先试一次再怀疑
@@ -13356,7 +15330,21 @@ window.__ModuleLoader__.load({
             const distillSkeleton = __mod_api_js.distillSkeleton
             const getDeviceId = __mod_api_js.getDeviceId
             const humanizeError = __mod_api_js.humanizeError
+            const notesMine = __mod_api_js.notesMine
+            const notesPreview = __mod_api_js.notesPreview
+            const notesStatus = __mod_api_js.notesStatus
+            const notesSync = __mod_api_js.notesSync
+            const profileGet = __mod_api_js.profileGet
+            const profileRebuild = __mod_api_js.profileRebuild
+            const relationsBuild = __mod_api_js.relationsBuild
+            const relationsClear = __mod_api_js.relationsClear
+            const relationsGet = __mod_api_js.relationsGet
+            const threadBuild = __mod_api_js.threadBuild
+            const threadList = __mod_api_js.threadList
             const searchBook = __mod_api_js.searchBook
+            const setBookLayout = __mod_api_js.setBookLayout
+            const vaultChoose = __mod_api_js.vaultChoose
+            const vaultDetect = __mod_api_js.vaultDetect
             const ensureStyle = __mod_style_js.ensureStyle
             const cssText = __mod_style_js.cssText
             const HIGHLIGHT_COLORS = __mod_style_js.HIGHLIGHT_COLORS
@@ -13390,6 +15378,10 @@ window.__ModuleLoader__.load({
             const distillSummary = __mod_distill_js.distillSummary
             const downloadMarkdown = __mod_distill_js.downloadMarkdown
             const exportFilename = __mod_distill_js.exportFilename
+            const NotesPanel = __mod_notes_js.NotesPanel
+            const autowriteText = __mod_notes_js.autowriteText
+            const obsidianUrl = __mod_notes_js.obsidianUrl
+            const relationsBatchNotice = __mod_notes_js.relationsNotice
 
       /**
        * 取选区所在段落的全文，当作「当前工作内容」交给 AI（0.8.0）。
@@ -13491,6 +15483,8 @@ window.__ModuleLoader__.load({
         theme: 'auto',
         columns: 2,
         fontFamily: '',
+        // 问 AI 的模式预设 id。空串＝没选过，由后端退回 general（一般问答）
+        aiAskPreset: '',
       }
 
       /** 统一的加载态。 */
@@ -13553,6 +15547,59 @@ window.__ModuleLoader__.load({
         const lineHeight = Number.isFinite(settings.lineHeight) ? settings.lineHeight : 1.75
         const themeKey = typeof settings.theme === 'string' ? settings.theme : 'light'
         const fontKey = typeof settings.fontFamily === 'string' ? settings.fontFamily : ''
+
+        // ── Obsidian 库（0.13.0）
+        // 库位置是这个抽屉里唯一一个「必须点一下才生效」的字段：它要落盘、要建子目录，
+        // 还得先确认那真是个能写的文件夹。所以它不走 change() 的去抖，走 vaultChoose。
+        const vaultPath = typeof settings.obsidianVault === 'string' ? settings.obsidianVault : ''
+        const vaultSubdir = typeof settings.obsidianSubdir === 'string' ? settings.obsidianSubdir : 'dsh-reading'
+        const vaultAutoWrite = settings.obsidianAutoWrite !== false
+        const vaultBackup = settings.obsidianBackup !== false
+        const [vaults, setVaults] = useState(null)
+        const [vaultBusy, setVaultBusy] = useState('')
+        const [vaultError, setVaultError] = useState('')
+        const [vaultInput, setVaultInput] = useState(vaultPath)
+
+        const detect = useCallback(() => {
+          setVaultBusy('detect')
+          setVaultError('')
+          vaultDetect()
+            .then((data) => {
+              setVaults(data && Array.isArray(data.vaults) ? data.vaults : [])
+            })
+            .catch((failure) => {
+              setVaults([])
+              setVaultError(humanizeError(failure))
+            })
+            .finally(() => setVaultBusy(''))
+        }, [])
+
+        // 抽屉一打开就去问一次本机有哪些库：大多数人不想手打路径。
+        useEffect(() => {
+          detect()
+        }, [detect])
+
+        useEffect(() => {
+          setVaultInput(vaultPath)
+        }, [vaultPath])
+
+        const choose = useCallback((target) => {
+          const value = typeof target === 'string' ? target.trim() : ''
+          if (value === '') {
+            setVaultError('先填一个库目录，或点上面检测到的那个。')
+            return
+          }
+          setVaultBusy('choose')
+          setVaultError('')
+          vaultChoose(value)
+            .then((data) => {
+              const saved = data && typeof data.path === 'string' ? data.path : value
+              if (typeof props.onChange === 'function') props.onChange({ obsidianVault: saved })
+              setVaultInput(saved)
+            })
+            .catch((failure) => setVaultError(humanizeError(failure)))
+            .finally(() => setVaultBusy(''))
+        }, [props.onChange])
 
         const change = (patch) => {
           if (typeof props.onChange === 'function') props.onChange(patch)
@@ -13697,6 +15744,97 @@ window.__ModuleLoader__.load({
                   onClick: () => change({ motion: 'off' }),
                 }, '关掉'),
               ),
+            ),
+            group('Obsidian 笔记'),
+            // 库位置：能自动认出来的就列成按钮，认不出来才让人手填。
+            h('div', { className: 'dr-field' },
+              h('div', { className: 'dr-field-label' }, '笔记库'),
+              vaultPath !== ''
+                ? h('div', { className: 'dr-field-path', title: vaultPath }, vaultPath)
+                : h('div', { className: 'dr-field-hint' }, '还没选库。选了之后，这本书的笔记会写进库里的一个子文件夹。'),
+              vaults !== null && vaults.length > 0
+                ? h('div', { className: 'dr-chips' },
+                  vaults.map((item) => h('button', {
+                    key: item.path,
+                    type: 'button',
+                    className: 'dr-chip' + (vaultPath === item.path ? ' is-on' : ''),
+                    title: item.path,
+                    disabled: vaultBusy !== '',
+                    onClick: () => choose(item.path),
+                  }, item.name || item.path)))
+                : null,
+              h('div', { className: 'dr-field-row' },
+                h('input', {
+                  type: 'text',
+                  className: 'dr-input',
+                  value: vaultInput,
+                  placeholder: '库目录的完整路径',
+                  'aria-label': 'Obsidian 库目录',
+                  onChange: (event) => setVaultInput(event.target.value),
+                }),
+                h('button', {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-sm',
+                  disabled: vaultBusy !== '',
+                  onClick: () => choose(vaultInput),
+                }, vaultBusy === 'choose' ? '检查中…' : '用这个')),
+              h('button', {
+                type: 'button',
+                className: 'dr-linkbtn',
+                disabled: vaultBusy !== '',
+                onClick: detect,
+              }, vaultBusy === 'detect' ? '正在找…' : '重新检测本机的库'),
+              vaultError !== ''
+                ? h('div', { className: 'dr-form-error', role: 'alert' }, vaultError)
+                : null,
+            ),
+            // 子目录：默认 dsh-reading，改错会写到库根，所以只允许一层名字。
+            h('div', { className: 'dr-field' },
+              h('div', { className: 'dr-field-label' }, '子文件夹'),
+              h('div', { className: 'dr-field-row' },
+                h('input', {
+                  type: 'text',
+                  className: 'dr-input',
+                  value: vaultSubdir,
+                  'aria-label': '笔记子文件夹',
+                  onChange: (event) => change({ obsidianSubdir: event.target.value }),
+                })),
+              h('div', { className: 'dr-field-hint' }, '只写这个名字底下的文件，库的其它地方不碰。'),
+            ),
+            // 两个开关：自动写回决定「问完 AI 要不要顺手落笔记」，备份决定「覆盖前留不留底」。
+            h('div', { className: 'dr-field' },
+              h('div', { className: 'dr-field-label' }, '问完自动写回'),
+              h('div', { className: 'dr-field-row' },
+                h('button', {
+                  type: 'button',
+                  className: 'dr-chip' + (vaultAutoWrite ? ' is-on' : ''),
+                  'aria-pressed': vaultAutoWrite ? 'true' : 'false',
+                  onClick: () => change({ obsidianAutoWrite: true }),
+                }, '开'),
+                h('button', {
+                  type: 'button',
+                  className: 'dr-chip' + (vaultAutoWrite ? '' : ' is-on'),
+                  'aria-pressed': vaultAutoWrite ? 'false' : 'true',
+                  onClick: () => change({ obsidianAutoWrite: false }),
+                }, '关')),
+              h('div', { className: 'dr-field-hint' }, '开着时，每次问完 AI 会顺手把这次讨论写进对应那一章。'),
+            ),
+            h('div', { className: 'dr-field' },
+              h('div', { className: 'dr-field-label' }, '同步前备份'),
+              h('div', { className: 'dr-field-row' },
+                h('button', {
+                  type: 'button',
+                  className: 'dr-chip' + (vaultBackup ? ' is-on' : ''),
+                  'aria-pressed': vaultBackup ? 'true' : 'false',
+                  onClick: () => change({ obsidianBackup: true }),
+                }, '留底'),
+                h('button', {
+                  type: 'button',
+                  className: 'dr-chip' + (vaultBackup ? '' : ' is-on'),
+                  'aria-pressed': vaultBackup ? 'false' : 'true',
+                  onClick: () => change({ obsidianBackup: false }),
+                }, '不留')),
+              h('div', { className: 'dr-field-hint' }, '覆盖已有笔记前，把旧文件存进子文件夹的 .history 里（留 20 份）。'),
             ),
             props.error
               ? h('div', { className: 'dr-drawer-error', role: 'alert' }, props.error)
@@ -13958,6 +16096,236 @@ window.__ModuleLoader__.load({
         return { data, loading, error, busyHref, notice, load, runChapter, runSkeleton, runExport, runClear }
       }
 
+      /**
+       * 读书笔记（0.13.0）：这本书在 Obsidian 里写成什么样了。
+       *
+       * 和 useDistill 一样「打开侧栏才取」——status 每次都要读两个文件的磁盘状态，
+       * 常驻轮询是白花钱。同步只有两个按钮：全部写入、只更新地图。
+       * 这里刻意不做「自动同步」——写别人的笔记库，得用户自己按下那个键。
+       */
+      function useNotes({ active, bookHash }) {
+        const [status, setStatus] = useState(null)
+        const [loading, setLoading] = useState(false)
+        const [error, setError] = useState('')
+        const [busy, setBusy] = useState('')
+        const [notice, setNotice] = useState('')
+        const [preview, setPreview] = useState(null)
+        // 「我写过什么」（P6）：只读 vault 里这本书文件夹的标题，失败就整张卡不出现
+        const [mine, setMine] = useState(null)
+        const [profile, setProfile] = useState(null)
+        const [profileBusy, setProfileBusy] = useState(false)
+        const [relations, setRelations] = useState(null)
+        const [relationsBusy, setRelationsBusy] = useState(false)
+        const [relationsNotice, setRelationsNotice] = useState('')
+        const [threads, setThreads] = useState(null)
+        const [threadBusy, setThreadBusy] = useState('')
+        const [threadNotice, setThreadNotice] = useState('')
+
+        const load = useCallback(async () => {
+          if (typeof bookHash !== 'string' || bookHash === '') return
+          setLoading(true)
+          setError('')
+          try {
+            setStatus(await notesStatus(bookHash))
+          } catch (failure) {
+            setError(humanizeError(failure))
+          } finally {
+            setLoading(false)
+          }
+        }, [bookHash])
+
+        /**
+         * 画像单独读、单独失败。
+         *
+         * 它和笔记状态捆在同一个 try 里是不行的：画像算不出来只是「这次按通用口径写」，
+         * 不该让整个笔记面板变成一条红字。所以这里 catch 住只把画像置空。
+         */
+        const loadProfile = useCallback(async () => {
+          if (typeof bookHash !== 'string' || bookHash === '') return
+          try {
+            setProfile(await profileGet(bookHash))
+          } catch (failure) {
+            setProfile(null)
+          }
+        }, [bookHash])
+
+        /**
+         * 「我写过什么」单独读、单独失败。
+         *
+         * 它比画像更「不该拖累别人」：库没连、文件夹不存在、外接盘没插都是常态，
+         * 任何一种都只让这张卡不出现，不影响上面那几张。
+         */
+        const loadMine = useCallback(async () => {
+          if (typeof bookHash !== 'string' || bookHash === '') return
+          try {
+            setMine(await notesMine(bookHash))
+          } catch (failure) {
+            setMine(null)
+          }
+        }, [bookHash])
+
+        const rebuildProfile = useCallback(async () => {
+          setProfileBusy(true)
+          try {
+            setProfile(await profileRebuild(bookHash))
+          } catch (failure) {
+            setError(humanizeError(failure))
+          } finally {
+            setProfileBusy(false)
+          }
+        }, [bookHash])
+
+        const runSync = useCallback(async (kinds) => {
+          const list = Array.isArray(kinds) ? kinds.filter((kind) => typeof kind === 'string' && kind !== '') : []
+          setBusy(list.length === 1 ? list[0] : 'all')
+          setError('')
+          setNotice('')
+          try {
+            const result = await notesSync(bookHash, list)
+            const written = Number.isFinite(result && result.written) ? result.written : 0
+            setNotice(written === 0 ? '已经是最新的，没有要写的。' : '写了 ' + written + ' 个块。')
+          } catch (failure) {
+            setError(humanizeError(failure))
+          } finally {
+            setBusy('')
+            await load()
+          }
+        }, [bookHash, load])
+
+        const runPreview = useCallback(async (kind) => {
+          setError('')
+          try {
+            setPreview(await notesPreview(bookHash, typeof kind === 'string' && kind !== '' ? kind : 'note'))
+          } catch (failure) {
+            setError(humanizeError(failure))
+          }
+        }, [bookHash])
+
+        /**
+         * 人物关系与跨书主题（0.13.0 P5）。
+         *
+         * 两个都单独读、单独失败：抽不了关系只是「这张卡空着」，
+         * 不该把整个笔记面板变红。跨书主题要扫全部书的问答，最慢，也最不该拖累别人。
+         */
+        const loadRelations = useCallback(async () => {
+          if (typeof bookHash !== 'string' || bookHash === '') return
+          try {
+            setRelations(await relationsGet(bookHash))
+          } catch (failure) {
+            setRelations(null)
+          }
+        }, [bookHash])
+
+        const runRelationsBuild = useCallback(async () => {
+          setRelationsBusy(true)
+          setRelationsNotice('')
+          setError('')
+          try {
+            const result = await relationsBuild(bookHash)
+            setRelationsNotice(relationsBatchNotice(result) || '这一批抽完了。')
+            setRelations(await relationsGet(bookHash))
+          } catch (failure) {
+            setError(humanizeError(failure))
+            setRelations(await relationsGet(bookHash).catch(() => null))
+          } finally {
+            setRelationsBusy(false)
+          }
+        }, [bookHash])
+
+        const runRelationsClear = useCallback(async () => {
+          setRelationsBusy(true)
+          setRelationsNotice('')
+          setError('')
+          try {
+            await relationsClear(bookHash)
+            setRelations(await relationsGet(bookHash))
+            setNotice('人物关系已经清空，下次从第一批重新抽。')
+          } catch (failure) {
+            setError(humanizeError(failure))
+          } finally {
+            setRelationsBusy(false)
+          }
+        }, [bookHash])
+
+        const loadThreads = useCallback(async () => {
+          if (typeof bookHash !== 'string' || bookHash === '') return
+          try {
+            setThreads(await threadList())
+          } catch (failure) {
+            setThreads(null)
+          }
+        }, [bookHash])
+
+        const runThreadBuild = useCallback(async (term) => {
+          if (typeof term !== 'string' || term === '') return
+          setThreadBusy(term)
+          setThreadNotice('')
+          setError('')
+          try {
+            const result = await threadBuild(term)
+            setThreadNotice('「' + result.term + '」那一页写好了，共 ' + result.bookCount + ' 本书、' + result.blockCount + ' 段讨论。')
+            setThreads(await threadList())
+          } catch (failure) {
+            setError(humanizeError(failure))
+          } finally {
+            setThreadBusy('')
+          }
+        }, [])
+
+        const openIndex = useCallback(() => {
+          const indexRelPath = threads && typeof threads.indexRelPath === 'string' ? threads.indexRelPath : ''
+          const url = status && indexRelPath !== '' ? obsidianUrl(status.vault, indexRelPath) : ''
+          if (url !== '') window.open(url, '_self')
+        }, [status, threads])
+
+        const openFile = useCallback((kind) => {
+          const items = status && Array.isArray(status.items) ? status.items : []
+          const item = items.find((entry) => entry && entry.kind === kind)
+          const url = item && status ? obsidianUrl(status.vault, item.relPath) : ''
+          if (url !== '') window.open(url, '_self')
+        }, [status])
+
+        useEffect(() => {
+          if (active) {
+            load()
+            loadProfile()
+            loadMine()
+            loadRelations()
+            loadThreads()
+          }
+        }, [active, load, loadProfile, loadMine, loadRelations, loadThreads])
+
+        return {
+          status,
+          loading,
+          error,
+          busy,
+          notice,
+          preview,
+          mine,
+          loadMine,
+          profile,
+          profileBusy,
+          relations,
+          relationsBusy,
+          relationsNotice,
+          threads,
+          threadBusy,
+          threadNotice,
+          load,
+          runSync,
+          runPreview,
+          openFile,
+          rebuildProfile,
+          runRelationsBuild,
+          runRelationsClear,
+          runThreadBuild,
+          loadThreads,
+          openIndex,
+          clearPreview: () => setPreview(null),
+        }
+      }
+
       function ReaderScreen(props) {
         const [frameDoc, setFrameDoc] = useState(null)
         const [settingsOpen, setSettingsOpen] = useState(false)
@@ -13992,6 +16360,17 @@ window.__ModuleLoader__.load({
         const [askError, setAskError] = useState('')
         // 同一次问答的多轮上下文：每成功一问 push 一轮，追问不再把上一轮顶掉
         const [askTurns, setAskTurns] = useState([])
+        // 这一条问答有没有顺手写进 Obsidian（宿主在 qa.ask 返回里带 obsidian）。
+        // null＝没问过 / 还没回来；对象＝宿主说了什么，文案由 notes.js 的 autowriteText 决定
+        const [askObsidian, setAskObsidian] = useState(null)
+        // 问 AI 的模式预设 id。初值取用户上次选的（settings.aiAskPreset），空串＝没选过，
+        // 由后端退回 general；打开面板不重置，用户选过就一直是他选的那个。
+        const [askMode, setAskMode] = useState(() => (
+          props.settings && typeof props.settings.aiAskPreset === 'string' ? props.settings.aiAskPreset : ''
+        ))
+        // 模式清单从后端拉（文案可能改，前端不硬编）。null＝还没拉到；
+        // 拉失败就给一项「一般问答」，下拉照常可用，绝不白屏。
+        const [askPresets, setAskPresets] = useState(null)
         // 一句中文提示（链接打不开 / 已复制 / 删除可撤销），无操作 2.4 秒消失，带操作 5 秒
         const [toast, setToast] = useState('')
         const [toastAction, setToastAction] = useState(null)
@@ -14012,6 +16391,41 @@ window.__ModuleLoader__.load({
           }
         }, [])
 
+        // 问 AI 的模式清单：整个阅读器生命周期里拉一次。
+        // 文案归后端管（可能改），前端只认 id/name。拉不到就退回一项「一般问答」，
+        // 下拉照常出现但不会误导——提问时后端本来就会退回 general。
+        // 这里**不动 askMode**：空串是「没选过」的合法状态，显示哪一项由选择器自己
+        // 退回第一项，发出去时后端按 general 处理。
+        useEffect(() => {
+          let alive = true
+          const settle = (list) => {
+            if (!alive) return
+            setAskPresets(list)
+          }
+          call('ask.presets')
+            .then((value) => {
+              const list = Array.isArray(value)
+                ? value.filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+                : []
+              settle(list.length > 0 ? list : [{ id: '', name: '一般问答' }])
+            })
+            .catch(() => settle([{ id: '', name: '一般问答' }]))
+          return () => {
+            alive = false
+          }
+        }, [props.bookHash])
+
+        // settings 里的 aiAskPreset 才是真值：书的设置是打开时才读完的，ReaderScreen
+        // 挂载那一瞬 props.settings 可能还是空的，所以拉到之后要跟上。空串＝没选过，
+        // 不用处理——选择器自己把空的显示成第一项（general），后端也按 general 走。
+        useEffect(() => {
+          const saved = props.settings && typeof props.settings.aiAskPreset === 'string'
+            ? props.settings.aiAskPreset
+            : ''
+          if (saved === '') return
+          setAskMode((prev) => (prev === saved ? prev : saved))
+        }, [props.settings])
+
         const annotations = useAnnotations({
           bookHash: props.bookHash,
           frameDoc,
@@ -14026,6 +16440,8 @@ window.__ModuleLoader__.load({
         const aiCenter = useAiCenter({ active: props.sideKind === 'ai' })
         // 读书蒸馏：一章一次调用，进度落在宿主侧（distill.json）
         const distill = useDistill({ active: props.sideKind === 'distill', bookHash: props.bookHash })
+        // 读书笔记：写进 Obsidian 库，同样打开侧栏才取
+        const notes = useNotes({ active: props.sideKind === 'companion', bookHash: props.bookHash })
 
         // 书内搜索（0.6.0）：真正的扫描在宿主侧（client/src/api.js 的 searchBook），
         // 面板只负责把命中列表画出来。这里用序号防止「搜了 A、又搜了 B，A 的结果慢到
@@ -14349,6 +16765,7 @@ window.__ModuleLoader__.load({
           })
           setAskQuestion('')
           setAskAnswer('')
+          setAskObsidian(null)
           setAskError('')
           setAskTurns([])
           setActiveAnn(null)
@@ -14433,6 +16850,7 @@ window.__ModuleLoader__.load({
           const restored = draft && draft.question.trim() !== '' ? draft.question : ''
           setAskQuestion(restored)
           setAskAnswer('')
+          setAskObsidian(null)
           setAskError(restored === '' ? '' : '上次那条没发出去，问题已经填回来了，可以直接再试一次。')
           setAskTurns([])
           setSelection(null)
@@ -14461,12 +16879,16 @@ window.__ModuleLoader__.load({
               author: props.meta && props.meta.author ? props.meta.author : '',
               // 当前工作内容：选区所在段落的前后文（0.8.0）
               surroundingText: askAnchor.surroundingText || '',
+              // 问 AI 的模式预设（0.11.0）。空串＝没选过，后端按 general 处理
+              mode: askMode,
             }
             // 发之前先把这次请求落在本机：失败时用户不必重述，重试就是「同一份再发一次」
             rememberAskDraft(props.bookHash, payload)
             const value = await call('qa.ask', payload)
             const answer = value && typeof value.answer === 'string' ? value.answer : ''
             setAskAnswer(answer)
+            // 宿主在问答成功后已经自己归位了一次（L0）；成没成、动了几块，都在这
+            setAskObsidian(value && value.obsidian && typeof value.obsidian === 'object' ? value.obsidian : null)
             // 追问逐轮累积：上一轮回答留在面板里，AI 侧记录也已落进 qa.jsonl
             setAskTurns((prev) => (answer === '' ? prev : [...prev, { question, answer }]))
             setAskQuestion('')
@@ -14479,7 +16901,7 @@ window.__ModuleLoader__.load({
           } finally {
             setAsking(false)
           }
-        }, [askAnchor, askQuestion, props.bookHash, props.meta, qaHistory])
+        }, [askAnchor, askQuestion, askMode, props.bookHash, props.meta, qaHistory])
 
         /** 「继续追问」：清掉输入框、保留上面的轮次，聚焦回输入框。 */
         const onNewQuestion = useCallback(() => {
@@ -14683,7 +17105,48 @@ window.__ModuleLoader__.load({
                         },
                       }),
                     )
-                    : null
+                    : props.sideKind === 'companion'
+                      ? h(NotesPanel, {
+                        status: notes.status,
+                        loading: notes.loading,
+                        error: notes.error,
+                        busy: notes.busy,
+                        notice: notes.notice,
+                        preview: notes.preview,
+                        mine: notes.mine,
+                        onMineReload: notes.loadMine,
+                        profile: notes.profile,
+                        profileBusy: notes.profileBusy,
+                        onProfileRebuild: notes.rebuildProfile,
+                        // 关掉个性化是「立刻生效、立刻落盘」的一次性动作，和问法偏好同一条路：
+                        // 走 patchSettings 的去抖会让卡片消失得比设置生效慢半拍。
+                        onProfileOff: () => {
+                          const next = { ...settingsRef.current, readerProfile: false }
+                          settingsRef.current = next
+                          if (typeof props.onPatchSettings === 'function') props.onPatchSettings(next)
+                          call('settings.put', { readerProfile: false }).catch(() => {
+                            // 记不住偏好不算错：这一次的界面已经按关掉处理了
+                          })
+                        },
+                        relations: notes.relations,
+                        threads: notes.threads,
+                        relationsBusy: notes.relationsBusy,
+                        relationsNotice: notes.relationsNotice,
+                        threadBusy: notes.threadBusy,
+                        threadNotice: notes.threadNotice,
+                        onRelationsBuild: notes.runRelationsBuild,
+                        onRelationsClear: notes.runRelationsClear,
+                        onThreadBuild: notes.runThreadBuild,
+                        onThreadReload: notes.loadThreads,
+                        onOpenIndex: notes.openIndex,
+                        onSync: notes.runSync,
+                        onPreview: notes.runPreview,
+                        onClosePreview: notes.clearPreview,
+                        onOpen: notes.openFile,
+                        onOpenSettings: () => setSettingsOpen(true),
+                        onReload: notes.load,
+                      })
+                      : null
 
         /**
          * 改设置：立刻生效（父组件 state 更新 → reader 重排），500ms 后落盘。
@@ -14718,6 +17181,25 @@ window.__ModuleLoader__.load({
           if (settingsSaveTimer.current !== null) clearTimeout(settingsSaveTimer.current)
         }, [])
 
+        /**
+         * 换「问 AI」的模式预设：先落界面，再把选择记进 settings。
+         *
+         * 为什么不走 patchSettings：那条路 500ms 去抖只发最后一次 patch，用户改完字号
+         * 立刻换模式时，前一次改动会被吞掉。模式是一次点击一个值，直接落盘更准；
+         * 写失败只吞掉——记不住偏好不该打断提问。
+         */
+        const onAskModeChange = useCallback((mode) => {
+          const next = typeof mode === 'string' ? mode : ''
+          setAskMode(next)
+          settingsRef.current = { ...settingsRef.current, aiAskPreset: next }
+          if (typeof props.onPatchSettings === 'function') {
+            props.onPatchSettings({ ...settingsRef.current, aiAskPreset: next })
+          }
+          call('settings.put', { aiAskPreset: next }).catch(() => {
+            // 记不住偏好不算错：这次提问照样按选中的模式发
+          })
+        }, [props.onPatchSettings])
+
         // 第一次进阅读器自动弹一次说明；之后只在用户点「?」时打开
         useEffect(() => {
           try {
@@ -14730,11 +17212,46 @@ window.__ModuleLoader__.load({
           }
         }, [])
 
+        // 老书第一次打开也要有机会选版式：导入时的询问只覆盖新导入，
+        // 已经躺在书架里的 PDF 打开时没有任何提示，用户就会以为功能没做。
+        const paperHint = props.meta && props.meta.format === 'pdf-converted' ? props.meta.pdfPaperHint : null
+        const askLayout = paperHint && paperHint.looksLikePaper === true
+          && props.meta.pdfLayoutByUser !== true
+
         return h(
           'div',
           { className: 'dr-root', ref: viewportWrapRef },
           annError && !annotations.loading
             ? h('div', { className: 'dr-error-box', role: 'alert', style: { margin: '8px 12px 0' } }, annError)
+            : null,
+          askLayout
+            ? h(
+              'div',
+              { className: 'dr-paper-banner', role: 'status' },
+              h(
+                'span',
+                { className: 'dr-paper-banner-text' },
+                `这本看起来是论文（${paperHint.reason || '开头有摘要或关键词'}）。要按论文排版吗？`,
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-sm dr-btn-primary',
+                  onClick: () => props.onChooseLayout && props.onChooseLayout('paper'),
+                },
+                '按论文排版',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dr-btn dr-btn-sm',
+                  onClick: () => props.onChooseLayout && props.onChooseLayout('book'),
+                },
+                '不用，保持书本',
+              ),
+            )
             : null,
           h(ReaderView, {
             bookHash: props.bookHash,
@@ -14764,11 +17281,8 @@ window.__ModuleLoader__.load({
             onOpenAi: () => {
               if (typeof props.onToggleSide === 'function') props.onToggleSide('ai')
             },
-            // 读书蒸馏入口（0.8.0）
-            distillDone: distillSummary(distill.data).done,
-            onOpenDistill: () => {
-              if (typeof props.onToggleSide === 'function') props.onToggleSide('distill')
-            },
+            // 读书蒸馏入口已经搬到书架（0.10.1）：阅读器工具栏不再有蒸馏按钮，
+            // 这里也就不再传 distillDone / onOpenDistill。侧栏仍由 sideKind='distill' 打开。
             // 正文点击 / Esc 收起浮层（reader 判断完白名单与拖选后回调）
             closeMenus: closeOverlays,
             // 书内链接跨章跳转与一句中文提示
@@ -14877,8 +17391,13 @@ window.__ModuleLoader__.load({
             answer: askAnswer,
             turns: askTurns,
             error: askError,
+            // 问 AI 的模式预设：清单来自后端 ask.presets，选中值来自 settings
+            mode: askMode,
+            onModeChange: onAskModeChange,
+            presets: askPresets,
             bookHash: props.bookHash,
-            metaText: askAnswer === '' ? '' : '已保存到这本书的问答里',
+            // 「已写进 Obsidian」优先说：定稿那句是常驻提示，写了笔记才是这一刻的结果
+            metaText: askAnswer === '' ? '' : (autowriteText(askObsidian) || '已保存到这本书的问答里'),
             // 这次调用随身携带了什么、现在 AI 通不通（0.8.0）
             surroundingChars: askAnchor && typeof askAnchor.surroundingText === 'string' ? askAnchor.surroundingText.length : 0,
             aiStatus: aiCenter.status,
@@ -15047,8 +17566,20 @@ window.__ModuleLoader__.load({
             { className: 'dr-root' },
             h(ShelfView, {
               onOpen: openBook,
+              // 书架上的「读书蒸馏」：打开这本书，直接把侧栏切到蒸馏。
+              // 顺序不能反——先 openBook 才有 bookHash，useDistill 才会带对书去拉进度。
+              onDistill: (hash) => {
+                openBook(hash)
+                setSideKind('distill')
+              },
               onImported: (hash) => {
                 openBook(hash)
+              },
+              // 书架角标「笔记 N」：打开这本书，直接把侧栏切到笔记页。
+              // 和 onDistill 一样，顺序不能反——先 openBook 才有 bookHash。
+              onNotes: (hash) => {
+                openBook(hash)
+                setSideKind('companion')
               },
             }),
           )
@@ -15110,6 +17641,18 @@ window.__ModuleLoader__.load({
           onToggleSide: toggleSide,
           onProgress,
           onClose: closeBook,
+          // 阅读器里的版式横幅：选完就地重排并重开这本书（重排后章号页码全变，
+          // 不重开就是一本旧页对着新目录看）。
+          onChooseLayout: async (layout) => {
+            try {
+              await setBookLayout(bookHash, layout)
+            } catch (err) {
+              setError(humanizeError(err))
+              setScreen('reader')
+              return
+            }
+            openBook(bookHash)
+          },
         })
       }
 

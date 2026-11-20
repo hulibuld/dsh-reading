@@ -105,6 +105,25 @@ export default async function run() {
     },
   }
 
+  // 0.10.1：阅读器工具栏在深色宿主主题下曾变成「黑底黑图标」。
+  // 规则很简单——工具栏按钮的前景与背景都钉在纸面上，不跟宿主走。
+  cases['阅读器工具栏按钮：透明底 + 纸面墨色字'] = () => {
+    const at = css.indexOf('.dr-reader .dr-reader-bar .dr-btn')
+    assert.ok(at >= 0, '缺少阅读器工具栏按钮的配色覆盖')
+    const block = css.slice(at, css.indexOf('}', at) + 1)
+    assert.match(block, /background:\s*transparent/, '背景必须透明，否则深色主题下会盖出深色底')
+    assert.match(block, /background-image:\s*none/, '必须清掉背景图，避免渐变残影')
+    assert.match(block, /color:\s*var\(--dsh-reading-ink/, '文字色必须取纸面墨色')
+    assert.ok(!/--dsw-alias-bg/.test(block), '不能引用宿主底色 token，深色主题下会和墨色撞车')
+    // 选中态必须同时覆盖图标按钮：目录/划线/搜索/AI 都是 .dr-iconbtn，
+    // 只写 .dr-btn 的话，打开侧栏后没有任何高亮。
+    assert.match(css, /\.dr-iconbtn\[aria-pressed=['\"]true['\"]\]/, '图标按钮也要有按下态')
+    assert.ok(
+      css.indexOf(".dr-reader .dr-reader-bar .dr-iconbtn[aria-pressed='true']") >= 0,
+      '阅读器工具栏的图标按下态要被高优先级规则覆盖',
+    )
+  }
+
   for (const [name, fn] of Object.entries(cases)) {
     try {
       fn()

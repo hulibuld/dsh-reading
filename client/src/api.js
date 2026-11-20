@@ -50,6 +50,15 @@ const ERROR_TEXT = {
   E_SOURCE_NONE: '还没有配置书源：先在找书面板里填一个搜索地址模板。',
   E_SOURCE_BAD: '这个书源的搜索地址写得不对，重新填一次。',
   E_SOURCE_FETCH: '连不上这个书源，可能是网络问题或地址写错了。',
+  // 「贴链接导入书源」这条路独有的三种失败：
+  // 用户贴的是一个网页、贴的是 file:// 这种本机地址、或者那个 JSON 大得离谱。
+  E_LEGADO_NOT_JSON: '这个地址打开是网页，不是书源文件。请换成书源 JSON 的直链（一般以 .json 结尾）。',
+  E_SOURCE_BAD_URL: '这个地址不是 http:// 或 https:// 开头，抓不了。请贴一个网页地址。',
+  E_SOURCE_TOO_BIG: '这个地址的文件太大了，不像是书源列表。请确认贴的是书源 JSON 的直链。',
+  E_PAPER_QUERY: '先输入要搜的主题词。',
+  E_PAPER_FETCH: '知网这会儿没回应，过一会儿再试。',
+  E_PAPER_EMPTY: '知网没搜到相关的文献，换个词试试。',
+  E_PAPER_COLLECT: '文献集没做成，可能是这几条题录不完整。',
   E_IMPORT_BAD_BASE64: '文件传输不完整，请重新导入一次。',
   E_ZIP_CORRUPT: '压缩包已经损坏，换一份文件再试。',
   E_XML_MALFORMED: '这本书的内部结构不合法，无法定位正文。',
@@ -231,6 +240,16 @@ export function updateBook(bookHash, patch) {
 }
 
 /**
+ * 选 PDF 的版式（0.9.8）：`'paper'` 论文、`'book'` 普通重排。
+ *
+ * 导入时宿主只给提示（`meta.pdfPaperHint`），不替用户决定；选哪边就调这边，
+ * 宿主会按目标版式真排一遍再落盘。
+ */
+export function setBookLayout(bookHash, layout) {
+  return call('book.layout', { bookHash, layout: layout === 'paper' ? 'paper' : 'book' })
+}
+
+/**
  * 换封面。`dataUrl` 是完整的 `data:image/...;base64,...`。
  *
  * @param {string} bookHash
@@ -354,4 +373,107 @@ export async function distillClear(bookHash) {
 export async function distillExport(bookHash) {
   const result = await call('distill.export', { bookHash })
   return result && typeof result.markdown === 'string' ? result.markdown : ''
+}
+
+// ── Obsidian 笔记（0.13.0）────────────────────────────────────────
+
+/**
+ * 本机有哪些 Obsidian 库。
+ *
+ * 读不到 obsidian.json 不算错（用户可能压根没装），所以这里永远成功，
+ * 由 found 说清楚。界面据 found=false 把整段设置藏起来。
+ */
+export async function vaultDetect() {
+  return call('vault.detect', {})
+}
+
+/** 手选库路径。校验（是目录、能写、不是磁盘根）在宿主侧做，失败会有中文原因。 */
+export async function vaultChoose(vaultPath) {
+  return call('vault.choose', { path: vaultPath })
+}
+
+/** 这本书的笔记现在长什么样：两份文件在不在、各几个块、上次同步时间。只读。 */
+export async function notesStatus(bookHash) {
+  return call('notes.status', { bookHash })
+}
+
+/**
+ * 同步到 Obsidian。
+ *
+ * kinds 省略 = 两份都同步；给 ['map'] 就只重做全书地图（那个便宜，笔记可能很长）。
+ */
+export async function notesSync(bookHash, kinds) {
+  const body = { bookHash }
+  if (Array.isArray(kinds) && kinds.length > 0) body.kinds = kinds
+  return call('notes.sync', body)
+}
+
+/** 只预览会写成什么，不落盘。 */
+export async function notesPreview(bookHash, kind = 'note') {
+  return call('notes.preview', { bookHash, kind })
+}
+
+/**
+ * 「这本书我写过什么」（P6）：读 vault 里这本书文件夹下已有的页。
+ *
+ * 宿主只回文件名与一二级小标题，不回正文——所以这份数据可以直接画在侧栏，
+ * 也不存在「把用户笔记喂给模型」这条路。
+ */
+export async function notesMine(bookHash) {
+  return call('notes.mine', { bookHash })
+}
+
+/**
+ * 这本书的读者画像：你在这本书里问过什么，笔记就照着那个侧重写。
+ *
+ * 返回的 sentence 是可以直接显示的两行字（{head, tail}）；没问过问题时是 null，
+ * 界面据此说「还没问过」，而不是显示「0 个问题」。
+ */
+export async function profileGet(bookHash) {
+  return call('profile.get', { bookHash })
+}
+
+/** 无视缓存重算一遍（界面上的「重新分析」）。 */
+export async function profileRebuild(bookHash) {
+  return call('profile.rebuild', { bookHash })
+}
+
+// ── 人物关系 / 跨书主题（0.13.0 P5）──────────────────────────────
+
+/** 这本书的人物关系抽到哪儿了、图长什么样。只读，不写盘。 */
+export async function relationsGet(bookHash) {
+  return call('relations.get', { bookHash })
+}
+
+/**
+ * 抽一批人物关系。会真的调一次模型（几十秒到两分钟），调用方要自己显示进度。
+ *
+ * index 省略 = 抽下一批没抽过的；给数字 = 重抽那一批。
+ * force 只在「这本书分类标错了、明明是小说却被判成非小说」时用。
+ */
+export async function relationsBuild(bookHash, options = {}) {
+  const body = { bookHash }
+  if (Number.isInteger(options.index)) body.index = options.index
+  if (options.force === true) body.force = true
+  return call('relations.build', body)
+}
+
+/** 清空人物关系（重来一遍时用）。 */
+export async function relationsClear(bookHash) {
+  return call('relations.clear', { bookHash })
+}
+
+/**
+ * 跨书主题：候选 + 已立。
+ *
+ * 宿主会把全部书的问答扫一遍，所以这里会慢一点（几百毫秒到几秒），
+ * 但它不调模型，慢也慢得有限。
+ */
+export async function threadList() {
+  return call('thread.list', {})
+}
+
+/** 把一条候选立成主题页。`term` 是候选里那个词，宿主会重新算一遍再写。 */
+export async function threadBuild(term) {
+  return call('thread.build', { term })
 }
