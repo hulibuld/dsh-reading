@@ -41,3 +41,7 @@ __pycache__/
 交接文档 *.md
 交接文档*.bak
 HANDOFF.local.md
+
+# 本机工作文档（不上传）
+计划书.md
+进度.md
