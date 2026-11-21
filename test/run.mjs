@@ -41,6 +41,10 @@ const SUITES = [
   'routes_test.mjs',
   // 「找书」纯函数层（模板拼接 / 候选抽取 / 文件名猜测，不联网）
   'source_test.mjs',
+  // 导入书源之后顺手清一次：引用保护优先于「用不了 / 停用」（0.13.1）
+  'legado_prune_test.mjs',
+  // 搜书四层静默失败：只试前 6 个源 / 尾部配置没拆 / body 当 GET / 结果没净化（0.13.2）
+  'legado_search_test.mjs',
   // 知网检索层（HTML → 题录的纯函数 + 可注入 fetch 的网络层，不联网）
   'cnki_test.mjs',
   'legado_test.mjs',
@@ -50,6 +54,10 @@ const SUITES = [
   'layout_css_test.mjs',
   'frame_metrics_test.mjs',
   'contrast_test.mjs',
+  // 深色主题：写错的变量名会静默失效，靠对比度测试查不出来（0.13.1）
+  'dark_test.mjs',
+  // 错误码 → 人话：没收录的码也要能把后半句放出来（0.13.1）
+  'humanize_test.mjs',
   'search_test.mjs',
   'meta_test.mjs',
   'coach_skill_test.mjs',

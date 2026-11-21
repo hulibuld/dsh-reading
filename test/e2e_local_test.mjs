@@ -770,49 +770,53 @@ export default async function run() {
       assert.equal(tooBig.statusCode, 400, `超限应 400，实际 ${tooBig.statusCode}`)
       assert.equal(tooBig.json().error.code, 'E_IMPORT_TOO_BIG', '超限必须报 E_IMPORT_TOO_BIG')
 
-      // (c) 找书：先没有书源 → 说清「还没配置书源」，而不是转圈
-      const noSource = await call(handler2, postJson(`${API_PREFIX}/source.search`, { query: '山' }))
+      // (c) 找书（0.13.1 起只剩 Legado 一条路）：没有书源时要明确说「还没有可用的书源」，
+      // 而不是转圈，也不是 500。老「网页模板书源」的 source.search 已经退役，打过去是 404。
+      const retired = await call(handler2, postJson(`${API_PREFIX}/source.search`, { query: '山' }))
+      assert.equal(retired.statusCode, 404, `退役的路由应当 404，实际 ${retired.statusCode}`)
+
+      const noSource = await call(handler2, postJson(`${API_PREFIX}/source.legado.search`, { keyword: '山' }))
       assert.equal(noSource.statusCode, 400, `没有书源应 400，实际 ${noSource.statusCode}`)
       assert.equal(noSource.json().error.code, 'E_SOURCE_NONE')
 
-      // 存一个书源（模板里带 {query}），马上就能用
-      const saved = okValue(
-        await call(
-          handler2,
-          postJson(`${API_PREFIX}/settings.put`, {
-            bookSources: [{ id: 'local-1', name: '本地测试源', searchUrl: `${origin}/search?q={query}` }],
-          }),
-        ),
-        'settings.put(bookSources)',
+      // 导入一条源，马上就能列出来——而且**只给五个字段**，规则树不许透到前端。
+      const oneJson = JSON.stringify([{
+        bookSourceUrl: 'https://e2e.invalid',
+        bookSourceName: '端到端源',
+        bookSourceGroup: '测试',
+        searchUrl: '/search?key={{key}}',
+        ruleSearch: { bookList: 'class.item', name: 'tag.a@text', bookUrl: 'tag.a@href' },
+        ruleToc: { chapterList: 'class.toc@tag.a', chapterName: 'tag.a@text', chapterUrl: 'tag.a@href' },
+        ruleContent: { content: '@css:#content@html' },
+      }])
+      const imported = okValue(
+        await call(handler2, postJson(`${API_PREFIX}/source.legado.import`, { json: oneJson })),
+        'source.legado.import',
       )
-      assert.equal(saved.bookSources.length, 1, '书源要能存进 settings')
+      assert.equal(imported.added, 1, '应当是新增一条')
 
-      const found = okValue(
-        await call(handler2, postJson(`${API_PREFIX}/source.search`, { query: '山' })),
-        'source.search',
+      const listed = okValue(await call(handler2, postJson(`${API_PREFIX}/source.legado.list`, {})), 'source.legado.list')
+      assert.equal(listed.sources.length, 1)
+      assert.deepEqual(
+        Object.keys(listed.sources[0]).sort(),
+        ['enabled', 'group', 'name', 'url', 'usable'],
+        `list 只许发五个字段，实际：${Object.keys(listed.sources[0]).join(',')}`,
       )
-      assert.equal(found.source.id, 'local-1')
-      assert.equal(found.source.name, '本地测试源')
-      assert.equal(found.url, `${origin}/search?q=${encodeURIComponent('山')}`, '模板里的 {query} 要被编码后换掉')
-      assert.equal(
-        found.candidates.length,
-        3,
-        `候选应恰好 3 条（javascript: 与重复项要被过滤）：${JSON.stringify(found.candidates)}`,
-      )
-      assert.equal(found.candidates[0].url, `${origin}/book.epub`)
-      assert.equal(found.candidates[1].url, `${origin}/rel/other.epub`, '相对地址要按页面地址解析成绝对地址')
-      assert.equal(found.candidates[2].url, `${origin}/book2.epub`)
-      assert.equal(found.candidates[0].title, '网络导入的书 · EPUB', '候选标题要去标签、压空白')
+      assert.equal(listed.sources[0].usable, true, '有搜索地址和列表规则的源是「能用」的')
+      assert.equal(listed.sources[0].group, '测试')
+      assert.equal(listed.sources[0].enabled, true)
 
-      // 坏书源（模板里没有 {query}）：严格模式必须挡住，否则搜索永远搜不到东西
-      const badSource = await call(
-        handler2,
-        postJson(`${API_PREFIX}/settings.put`, {
-          bookSources: [{ id: 'bad', name: '坏源', searchUrl: 'https://example.com/search' }],
-        }),
+      // 坏 JSON 要有一句人话（不是 JSON.parse 的原文） + 400，不能 500
+      const badJson = await call(handler2, postJson(`${API_PREFIX}/source.legado.import`, { json: '[{' }))
+      assert.equal(badJson.statusCode, 400, `坏 JSON 应 400，实际 ${badJson.statusCode}`)
+      assert.equal(badJson.json().error.code, 'E_LEGADO_BAD_JSON')
+      assert.match(badJson.json().error.message, /不是合法的书源 JSON/, '要说人话，不许把 JSON.parse 的原文顶上来')
+
+      // 清干净，后面的用例还在断言「新书库没有书源」
+      okValue(
+        await call(handler2, postJson(`${API_PREFIX}/source.legado.remove`, { url: 'https://e2e.invalid' })),
+        'source.legado.remove(e2e)',
       )
-      assert.equal(badSource.statusCode, 400)
-      assert.equal(badSource.json().error.code, 'E_BAD_SETTINGS', '没有 {query} 的模板必须拒绝保存')
     } finally {
       // 不等 keep-alive 自己超时，否则测试会挂几十秒
       server.closeAllConnections?.()

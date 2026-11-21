@@ -25,6 +25,24 @@ function errorText(error) {
   return humanizeError(error)
 }
 
+/**
+ * 导入结果的提示文案。
+ *
+ * 「顺手清掉了 N 个用不上的源」这一句必须说：清理是用户没要求的后续动作，
+ * 不说清楚，用户下次发现源少了会以为是 bug。
+ */
+function importNotice(data) {
+  const rejected = Array.isArray(data?.rejected) ? data.rejected : []
+  const parts = []
+  if (data?.added) parts.push(`新增 ${data.added} 个`)
+  if (data?.updated) parts.push(`更新 ${data.updated} 个`)
+  if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
+  let text = `已导入：${parts.join('，') || '没有变化'}。`
+  const removed = Number(data?.pruned?.removed) || 0
+  if (removed > 0) text += `顺手清掉了 ${removed} 个用不上的源。`
+  return text
+}
+
 export function LegadoPanel(props) {
   const open = props?.open === true
   const [tab, setTab] = React.useState('search')
@@ -32,6 +50,9 @@ export function LegadoPanel(props) {
   const [searching, setSearching] = React.useState(false)
   const [results, setResults] = React.useState(null)
   const [failures, setFailures] = React.useState([])
+  const [nextOffset, setNextOffset] = React.useState(null) // 还有下一批可搜时才有值
+  const [searched, setSearched] = React.useState(0) // 这次一共试了多少个源
+  const [skipped, setSkipped] = React.useState({ script: 0, broken: 0 })
   const [notice, setNotice] = React.useState('')
   const [error, setError] = React.useState('')
   const [sources, setSources] = React.useState(null)
@@ -75,9 +96,40 @@ export function LegadoPanel(props) {
       const data = await call('source.legado.search', { keyword: term })
       setResults(Array.isArray(data?.results) ? data.results.slice(0, MAX_ROWS) : [])
       setFailures(Array.isArray(data?.failures) ? data.failures : [])
+      setNextOffset(Number.isInteger(data?.nextOffset) ? data.nextOffset : null)
+      setSkipped(data?.skipped ?? { script: 0, broken: 0 })
+      setSearched(Number(data?.searched) || 0)
     } catch (err) {
       setResults([])
       setFailures([])
+      setNextOffset(null)
+      setError(errorText(err))
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  /**
+   * 再搜一批。
+   *
+   * 为什么要有这个按钮：几千个源不可能一次全打。第一批没命中时就该让用户
+   * 自己决定要不要继续，而不是替他跑满六轮（那要两分钟）。
+   */
+  const searchMore = async () => {
+    if (nextOffset === null) return
+    setSearching(true)
+    setError('')
+    try {
+      const data = await call('source.legado.search', { keyword: keyword.trim(), offset: nextOffset })
+      const more = Array.isArray(data?.results) ? data.results : []
+      setResults((prev) => {
+        const seen = new Set((prev ?? []).map((item) => item.bookUrl))
+        return [...(prev ?? []), ...more.filter((item) => !seen.has(item.bookUrl))].slice(0, MAX_ROWS)
+      })
+      setFailures(Array.isArray(data?.failures) ? [...failures, ...data.failures] : failures)
+      setNextOffset(Number.isInteger(data?.nextOffset) ? data.nextOffset : null)
+      setSearched((prev) => prev + (Number(data?.searched) || 0))
+    } catch (err) {
       setError(errorText(err))
     } finally {
       setSearching(false)
@@ -94,12 +146,7 @@ export function LegadoPanel(props) {
     setSourceError('')
     try {
       const data = await call('source.legado.import', { json: payload })
-      const rejected = Array.isArray(data?.rejected) ? data.rejected : []
-      const parts = []
-      if (data?.added) parts.push(`新增 ${data.added} 个`)
-      if (data?.updated) parts.push(`更新 ${data.updated} 个`)
-      if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
-      setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
+      setNotice(importNotice(data))
       setImportText('')
       await reloadSources()
     } catch (err) {
@@ -120,12 +167,7 @@ export function LegadoPanel(props) {
     setSourceError('')
     try {
       const data = await call('source.legado.import', { url: link })
-      const rejected = Array.isArray(data?.rejected) ? data.rejected : []
-      const parts = []
-      if (data?.added) parts.push(`新增 ${data.added} 个`)
-      if (data?.updated) parts.push(`更新 ${data.updated} 个`)
-      if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
-      setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
+      setNotice(importNotice(data))
       setImportUrl('')
       await reloadSources()
     } catch (err) {
@@ -221,14 +263,31 @@ export function LegadoPanel(props) {
           'div',
           { className: 'dr-legado-empty' },
           h('span', { className: 'dr-legado-empty-icon' }, '🤔'),
-          h('span', null, '没有搜到'),
-          h('span', null, '换个关键词，或去「书源」页看看源是不是被停用了'),
+          h('span', null, '这批 ' + searched + ' 个源里没有搜到'),
+          nextOffset !== null
+            ? h('span', null, '点下面「再搜一批」继续往后找')
+            : h('span', null, '已翻遍全部可用的源。换个关键词，或去「书源」页加几个源'),
         )
         : h(
           'div',
           { className: 'dr-legado-count' },
-          `找到 ${results.length} 本`,
+          '找到 ' + results.length + ' 本 · 已试 ' + searched + ' 个源',
         ),
+    results !== null && nextOffset !== null
+      ? h(
+        'div',
+        { className: 'dr-legado-row' },
+        h('button',
+          {
+            type: 'button',
+            className: 'dr-btn',
+            disabled: searching,
+            onClick: searchMore,
+          },
+          searching ? '正在搜…' : '再搜一批'),
+        h('span', { className: 'dr-note dr-note-quiet' }, '已试 ' + searched + ' 个，还没翻完'),
+      )
+      : null,
         results === null || results.length === 0
           ? null
           : h(
@@ -315,6 +374,13 @@ export function LegadoPanel(props) {
         ),
       ),
       h('p', { className: 'dr-note' }, '另一种给法：Legado「网络导入」拿到的 JSON 整包粘在下面，或者选一个 .json 文件。'),
+      // 导入没有进度条，也不能有：整包是**一次请求**，服务端解析完才回话，
+      // 中间没有可汇报的阶段。不先说清楚，用户看着按钮上的「导入中…」不动会以为卡死。
+      h(
+        'p',
+        { className: 'dr-note dr-note-quiet' },
+        '一个书源上传大约 0.3s，上传过程中不显示进度，请静默等待。',
+      ),
       h('textarea', {
         className: 'dr-input dr-legado-textarea',
         rows: 6,
@@ -379,7 +445,9 @@ export function LegadoPanel(props) {
                 [
                   source.group ? `分组：${source.group}` : '',
                   source.enabled === false ? '已停用' : '启用中',
-                  source.searchUrl ? '' : '没有搜索地址',
+                  // 0.13.1 起 list 只发投影字段（不再有 searchUrl / 规则树），
+                  // 能不能用由宿主算好塞进 usable，前端只负责照说。
+                  source.usable ? '' : '用不了（缺搜索地址或列表规则）',
                 ].filter(Boolean).join(' · '),
               ),
             ),

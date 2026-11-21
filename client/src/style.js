@@ -1062,7 +1062,7 @@ const CSS = `
 }
 .dr-pagejump-input::-webkit-outer-spin-button,
 .dr-pagejump-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.dr-pagejump-input:focus { outline: 2px solid var(--dsh-reading-accent, #4a7dff); outline-offset: 1px; }
+.dr-pagejump-input:focus { outline: 2px solid var(--dsh-reading-ui-accent, #4a7dff); outline-offset: 1px; }
 .dr-pagejump-hint { opacity: 0.6; white-space: nowrap; }
 .dr-pagebar-pct { font-variant-numeric: tabular-nums; opacity: 0.6; white-space: nowrap; }
 .dr-pagebar-track {
@@ -1502,7 +1502,7 @@ const CSS = `
   cursor: pointer;
 }
 
-/* ── 导入面板：本地文件 / 粘贴链接 / 找书（0.5.1） ───────────── */
+/* ── 导入面板：本地文件 / 粘贴链接 / 指路书源 / 知网（0.5.1） ───── */
 .dr-import {
   width: min(560px, calc(100vw - 32px));
 }
@@ -1540,10 +1540,6 @@ const CSS = `
   font-size: 11.5px;
   color: var(--dsw-alias-state-error-primary, #c4342b);
 }
-.dr-import-linkbtn {
-  align-self: flex-start;
-  font-size: 12px;
-}
 .dr-candidates {
   display: flex;
   flex-direction: column;
@@ -1567,14 +1563,6 @@ const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.dr-source-form {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--dsw-alias-border-l1, #e3e5e8);
-}
-
 /* 窄屏：筛选栏与导入面板都退化成单列 */
 @media (max-width: 720px) {
   .dr-filters {
@@ -1635,6 +1623,14 @@ const CSS_TOKENS = `
   /* 描边：普通与加重。0.5px 在多数屏幕上会被抹掉，一律 1px */
   --dsh-reading-ui-line: var(--dsw-alias-border-l3, #e2ded5);
   --dsh-reading-ui-line-strong: var(--dsw-alias-border-l4, #cdc7ba);
+  /* 0.13.1 补的四个别名：这三处样式是 0.12 加的，写的时候用了不存在的名字
+     （--dsh-reading-ui-rule / --dsh-reading-ui-bg-card / --dsh-reading-mono），
+     变量没定义就一路回落到硬编码的浅色，深色主题下变成白卡片、白边框。
+     在这里补齐，而不是把四处用法改回 --ui-line，是因为语义确实不同：
+     规则线比普通描边淡、卡片底色比浮起层浅一个档。 */
+  --dsh-reading-ui-rule: var(--dsh-reading-ui-line, #e2ded5);
+  --dsh-reading-ui-bg-card: var(--dsh-reading-ui-bg, #ffffff);
+  --dsh-reading-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   /* 文字：主、次、弱 */
   --dsh-reading-ui-ink: var(--dsw-alias-label-primary, #22262b);
   --dsh-reading-ui-ink-dim: var(--dsw-alias-label-secondary, #5a5f66);
@@ -3017,6 +3013,12 @@ export const CSS_LEGADO = `
   color: var(--dsw-alias-label-primary, #22262b);
   border-left: 2px solid #c0392b;
   padding-left: 8px;
+}
+/* 说明性的一行（「一个书源约 0.3 秒，请静默等待」这类）：要看得见，但不该比正文抢眼。
+   用普通说明文字，不加边框——加了边框就变成「提示 / 警告」，而这句只是交代。 */
+.dr-note-quiet {
+  color: var(--dsw-alias-label-tertiary, #8b8f96);
+  font-size: 11.5px;
 }
 @media (max-width: 720px) {
   .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsh-reading-ui-r-none, 0); }

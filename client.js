@@ -2325,7 +2325,7 @@ window.__ModuleLoader__.load({
         E_IMPORT_URL_BAD: '这个链接打不开，请检查它是否以 http:// 或 https:// 开头。',
         E_IMPORT_DOWNLOAD: '下载失败了，可能是网络不通或对方站点拒绝了访问。',
         E_SOURCE_QUERY: '先输入要搜的书名或作者。',
-        E_SOURCE_NONE: '还没有配置书源：先在找书面板里填一个搜索地址模板。',
+        E_SOURCE_NONE: '还没有可用书源：点顶部「书源」，导入一份 Legado 书源 JSON 就能搜书了。',
         E_SOURCE_BAD: '这个书源的搜索地址写得不对，重新填一次。',
         E_SOURCE_FETCH: '连不上这个书源，可能是网络问题或地址写错了。',
         // 「贴链接导入书源」这条路独有的三种失败：
@@ -2348,6 +2348,9 @@ window.__ModuleLoader__.load({
         E_BUSY: '上一次操作还没结束，请稍等一下。',
         E_BAD_REQUEST: '这次请求没能被接受，请重试一次。',
         E_INTERNAL: '后台出了点问题，请稍后再试。',
+        E_BODY_TOO_BIG: '这次提交的内容太大了，分成几次再试。',
+        E_LEGADO_EMPTY: '没有收到书源内容：贴一段链接、把 JSON 复制进来，或者选一个 .json 文件。',
+        E_LEGADO_BAD_JSON: '这个文件不是合法的书源 JSON，检查一下有没有复制全。',
       }
 
       /** 完全给不出信息时的兜底。绝不留空，也绝不显示异常原文。 */
@@ -2381,6 +2384,16 @@ window.__ModuleLoader__.load({
 
         const text = raw.trim()
         if (text === '') return ''
+
+        // 通用解包：宿主契约是「CODE: 人话」。码前缀本身会被 MACHINE_PATTERNS 判成
+        // 机器语言（\bE_[A-Z][A-Z0-9_]+\b），那样即使后半段是好好的中文，整句也会被
+        // 顶成 GENERIC。所以先剥掉码前缀：后半段是中文且不含机器语言，就直接用它。
+        // 这样表里没收录的码（新增的、以后忘了补的）也能出中文。
+        const unpacked = /^([A-Z][A-Z0-9_]{2,40}):\s*([\s\S]+)$/.exec(text)
+        if (unpacked) {
+          const rest = unpacked[2].trim()
+          if (rest !== '' && /[\u4e00-\u9fa5]/.test(rest) && !MACHINE_PATTERNS.some((re) => re.test(rest))) return rest
+        }
 
         // 已知码优先：宿主返回的 message 基本就是给人看的中文，码只是补充定位
         for (const code of Object.keys(ERROR_TEXT)) {
@@ -3825,7 +3838,7 @@ window.__ModuleLoader__.load({
       }
       .dr-pagejump-input::-webkit-outer-spin-button,
       .dr-pagejump-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-      .dr-pagejump-input:focus { outline: 2px solid var(--dsh-reading-accent, #4a7dff); outline-offset: 1px; }
+      .dr-pagejump-input:focus { outline: 2px solid var(--dsh-reading-ui-accent, #4a7dff); outline-offset: 1px; }
       .dr-pagejump-hint { opacity: 0.6; white-space: nowrap; }
       .dr-pagebar-pct { font-variant-numeric: tabular-nums; opacity: 0.6; white-space: nowrap; }
       .dr-pagebar-track {
@@ -4265,7 +4278,7 @@ window.__ModuleLoader__.load({
         cursor: pointer;
       }
 
-      /* ── 导入面板：本地文件 / 粘贴链接 / 找书（0.5.1） ───────────── */
+      /* ── 导入面板：本地文件 / 粘贴链接 / 指路书源 / 知网（0.5.1） ───── */
       .dr-import {
         width: min(560px, calc(100vw - 32px));
       }
@@ -4303,10 +4316,6 @@ window.__ModuleLoader__.load({
         font-size: 11.5px;
         color: var(--dsw-alias-state-error-primary, #c4342b);
       }
-      .dr-import-linkbtn {
-        align-self: flex-start;
-        font-size: 12px;
-      }
       .dr-candidates {
         display: flex;
         flex-direction: column;
@@ -4330,14 +4339,6 @@ window.__ModuleLoader__.load({
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .dr-source-form {
-        display: flex;
-        flex-direction: column;
-        gap: 7px;
-        padding-top: 6px;
-        border-top: 1px dashed var(--dsw-alias-border-l1, #e3e5e8);
-      }
-
       /* 窄屏：筛选栏与导入面板都退化成单列 */
       @media (max-width: 720px) {
         .dr-filters {
@@ -4398,6 +4399,14 @@ window.__ModuleLoader__.load({
         /* 描边：普通与加重。0.5px 在多数屏幕上会被抹掉，一律 1px */
         --dsh-reading-ui-line: var(--dsw-alias-border-l3, #e2ded5);
         --dsh-reading-ui-line-strong: var(--dsw-alias-border-l4, #cdc7ba);
+        /* 0.13.1 补的四个别名：这三处样式是 0.12 加的，写的时候用了不存在的名字
+           （--dsh-reading-ui-rule / --dsh-reading-ui-bg-card / --dsh-reading-mono），
+           变量没定义就一路回落到硬编码的浅色，深色主题下变成白卡片、白边框。
+           在这里补齐，而不是把四处用法改回 --ui-line，是因为语义确实不同：
+           规则线比普通描边淡、卡片底色比浮起层浅一个档。 */
+        --dsh-reading-ui-rule: var(--dsh-reading-ui-line, #e2ded5);
+        --dsh-reading-ui-bg-card: var(--dsh-reading-ui-bg, #ffffff);
+        --dsh-reading-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
         /* 文字：主、次、弱 */
         --dsh-reading-ui-ink: var(--dsw-alias-label-primary, #22262b);
         --dsh-reading-ui-ink-dim: var(--dsw-alias-label-secondary, #5a5f66);
@@ -5781,6 +5790,12 @@ window.__ModuleLoader__.load({
         border-left: 2px solid #c0392b;
         padding-left: 8px;
       }
+      /* 说明性的一行（「一个书源约 0.3 秒，请静默等待」这类）：要看得见，但不该比正文抢眼。
+         用普通说明文字，不加边框——加了边框就变成「提示 / 警告」，而这句只是交代。 */
+      .dr-note-quiet {
+        color: var(--dsw-alias-label-tertiary, #8b8f96);
+        font-size: 11.5px;
+      }
       @media (max-width: 720px) {
         .dr-legado-card { width: 100vw; max-height: 100vh; border-radius: var(--dsh-reading-ui-r-none, 0); }
         .dr-legado-item { flex-direction: column; align-items: stretch; }
@@ -7117,6 +7132,24 @@ window.__ModuleLoader__.load({
         return humanizeError(error)
       }
 
+      /**
+       * 导入结果的提示文案。
+       *
+       * 「顺手清掉了 N 个用不上的源」这一句必须说：清理是用户没要求的后续动作，
+       * 不说清楚，用户下次发现源少了会以为是 bug。
+       */
+      function importNotice(data) {
+        const rejected = Array.isArray(data?.rejected) ? data.rejected : []
+        const parts = []
+        if (data?.added) parts.push(`新增 ${data.added} 个`)
+        if (data?.updated) parts.push(`更新 ${data.updated} 个`)
+        if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
+        let text = `已导入：${parts.join('，') || '没有变化'}。`
+        const removed = Number(data?.pruned?.removed) || 0
+        if (removed > 0) text += `顺手清掉了 ${removed} 个用不上的源。`
+        return text
+      }
+
       function LegadoPanel(props) {
         const open = props?.open === true
         const [tab, setTab] = React.useState('search')
@@ -7124,6 +7157,9 @@ window.__ModuleLoader__.load({
         const [searching, setSearching] = React.useState(false)
         const [results, setResults] = React.useState(null)
         const [failures, setFailures] = React.useState([])
+        const [nextOffset, setNextOffset] = React.useState(null) // 还有下一批可搜时才有值
+        const [searched, setSearched] = React.useState(0) // 这次一共试了多少个源
+        const [skipped, setSkipped] = React.useState({ script: 0, broken: 0 })
         const [notice, setNotice] = React.useState('')
         const [error, setError] = React.useState('')
         const [sources, setSources] = React.useState(null)
@@ -7167,9 +7203,40 @@ window.__ModuleLoader__.load({
             const data = await call('source.legado.search', { keyword: term })
             setResults(Array.isArray(data?.results) ? data.results.slice(0, MAX_ROWS) : [])
             setFailures(Array.isArray(data?.failures) ? data.failures : [])
+            setNextOffset(Number.isInteger(data?.nextOffset) ? data.nextOffset : null)
+            setSkipped(data?.skipped ?? { script: 0, broken: 0 })
+            setSearched(Number(data?.searched) || 0)
           } catch (err) {
             setResults([])
             setFailures([])
+            setNextOffset(null)
+            setError(errorText(err))
+          } finally {
+            setSearching(false)
+          }
+        }
+
+        /**
+         * 再搜一批。
+         *
+         * 为什么要有这个按钮：几千个源不可能一次全打。第一批没命中时就该让用户
+         * 自己决定要不要继续，而不是替他跑满六轮（那要两分钟）。
+         */
+        const searchMore = async () => {
+          if (nextOffset === null) return
+          setSearching(true)
+          setError('')
+          try {
+            const data = await call('source.legado.search', { keyword: keyword.trim(), offset: nextOffset })
+            const more = Array.isArray(data?.results) ? data.results : []
+            setResults((prev) => {
+              const seen = new Set((prev ?? []).map((item) => item.bookUrl))
+              return [...(prev ?? []), ...more.filter((item) => !seen.has(item.bookUrl))].slice(0, MAX_ROWS)
+            })
+            setFailures(Array.isArray(data?.failures) ? [...failures, ...data.failures] : failures)
+            setNextOffset(Number.isInteger(data?.nextOffset) ? data.nextOffset : null)
+            setSearched((prev) => prev + (Number(data?.searched) || 0))
+          } catch (err) {
             setError(errorText(err))
           } finally {
             setSearching(false)
@@ -7186,12 +7253,7 @@ window.__ModuleLoader__.load({
           setSourceError('')
           try {
             const data = await call('source.legado.import', { json: payload })
-            const rejected = Array.isArray(data?.rejected) ? data.rejected : []
-            const parts = []
-            if (data?.added) parts.push(`新增 ${data.added} 个`)
-            if (data?.updated) parts.push(`更新 ${data.updated} 个`)
-            if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
-            setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
+            setNotice(importNotice(data))
             setImportText('')
             await reloadSources()
           } catch (err) {
@@ -7212,12 +7274,7 @@ window.__ModuleLoader__.load({
           setSourceError('')
           try {
             const data = await call('source.legado.import', { url: link })
-            const rejected = Array.isArray(data?.rejected) ? data.rejected : []
-            const parts = []
-            if (data?.added) parts.push(`新增 ${data.added} 个`)
-            if (data?.updated) parts.push(`更新 ${data.updated} 个`)
-            if (rejected.length > 0) parts.push(`${rejected.length} 个没导进来`)
-            setNotice(`已导入：${parts.join('，') || '没有变化'}。`)
+            setNotice(importNotice(data))
             setImportUrl('')
             await reloadSources()
           } catch (err) {
@@ -7313,14 +7370,31 @@ window.__ModuleLoader__.load({
                 'div',
                 { className: 'dr-legado-empty' },
                 h('span', { className: 'dr-legado-empty-icon' }, '🤔'),
-                h('span', null, '没有搜到'),
-                h('span', null, '换个关键词，或去「书源」页看看源是不是被停用了'),
+                h('span', null, '这批 ' + searched + ' 个源里没有搜到'),
+                nextOffset !== null
+                  ? h('span', null, '点下面「再搜一批」继续往后找')
+                  : h('span', null, '已翻遍全部可用的源。换个关键词，或去「书源」页加几个源'),
               )
               : h(
                 'div',
                 { className: 'dr-legado-count' },
-                `找到 ${results.length} 本`,
+                '找到 ' + results.length + ' 本 · 已试 ' + searched + ' 个源',
               ),
+          results !== null && nextOffset !== null
+            ? h(
+              'div',
+              { className: 'dr-legado-row' },
+              h('button',
+                {
+                  type: 'button',
+                  className: 'dr-btn',
+                  disabled: searching,
+                  onClick: searchMore,
+                },
+                searching ? '正在搜…' : '再搜一批'),
+              h('span', { className: 'dr-note dr-note-quiet' }, '已试 ' + searched + ' 个，还没翻完'),
+            )
+            : null,
               results === null || results.length === 0
                 ? null
                 : h(
@@ -7407,6 +7481,13 @@ window.__ModuleLoader__.load({
               ),
             ),
             h('p', { className: 'dr-note' }, '另一种给法：Legado「网络导入」拿到的 JSON 整包粘在下面，或者选一个 .json 文件。'),
+            // 导入没有进度条，也不能有：整包是**一次请求**，服务端解析完才回话，
+            // 中间没有可汇报的阶段。不先说清楚，用户看着按钮上的「导入中…」不动会以为卡死。
+            h(
+              'p',
+              { className: 'dr-note dr-note-quiet' },
+              '一个书源上传大约 0.3s，上传过程中不显示进度，请静默等待。',
+            ),
             h('textarea', {
               className: 'dr-input dr-legado-textarea',
               rows: 6,
@@ -7471,7 +7552,9 @@ window.__ModuleLoader__.load({
                       [
                         source.group ? `分组：${source.group}` : '',
                         source.enabled === false ? '已停用' : '启用中',
-                        source.searchUrl ? '' : '没有搜索地址',
+                        // 0.13.1 起 list 只发投影字段（不再有 searchUrl / 规则树），
+                        // 能不能用由宿主算好塞进 usable，前端只负责照说。
+                        source.usable ? '' : '用不了（缺搜索地址或列表规则）',
                       ].filter(Boolean).join(' · '),
                     ),
                   ),
@@ -8397,11 +8480,11 @@ window.__ModuleLoader__.load({
        * 三条路并列摆出来，而不是藏在二级菜单里：
        *   ① 本地文件 —— 原来就有的行为；
        *   ② 粘贴链接 —— 从任何地方复制来的书籍直链，粘进来就下载入架；
-       *   ③ 找书     —— 用户自己填一个「搜索地址模板」，插件去抓结果页列出候选；
-       *   ④ 知网检索 —— 直接搜知网，勾几条存成一本文献集（0.12.0）。
+       *   ③ 知网检索 —— 直接搜知网，勾几条存成一本文献集（0.12.0）。
        *
-       * 为什么不内置书源：插件不该替用户决定去哪个站点找书。这里只提供机制，
-       * 地址由用户自己填；模板里 `{query}` 会被换成关键词。
+       * 原来的「③ 找书（自己填搜索地址模板）」在 0.13.1 退役：那一套只能抓一页
+       * HTML 里的下载直链，站点一改版就废，而且和 Legado 书源功能重复。找书统一走
+       * 顶部的「书源」面板（LegadoPanel）：导入书源 → 搜书名 → 一键入架。
        */
       function ImportDialog(props) {
         const fileRef = useRef(null)
@@ -8409,23 +8492,7 @@ window.__ModuleLoader__.load({
         const [urlBusy, setUrlBusy] = useState(false)
         const [urlError, setUrlError] = useState('')
 
-        const [keyword, setKeyword] = useState('')
-        const [searching, setSearching] = useState(false)
-        const [searchError, setSearchError] = useState('')
-        const [searchInfo, setSearchInfo] = useState('')
-        const [candidates, setCandidates] = useState(null)
-        const [downloading, setDownloading] = useState('')
-        const [downloadError, setDownloadError] = useState('')
-
-        const [sources, setSources] = useState(null)
-        const [sourceId, setSourceId] = useState('')
-        const [formOpen, setFormOpen] = useState(false)
-        const [formName, setFormName] = useState('')
-        const [formTemplate, setFormTemplate] = useState('')
-        const [formError, setFormError] = useState('')
-        const [savingSource, setSavingSource] = useState(false)
-
-        // ④ 知网检索（0.12.0）
+        // ③ 知网检索（0.12.0）
         const [paperQuery, setPaperQuery] = useState('')
         const [paperField, setPaperField] = useState('title')
         const [paperOrder, setPaperOrder] = useState(4)
@@ -8439,26 +8506,6 @@ window.__ModuleLoader__.load({
         const [paperCollecting, setPaperCollecting] = useState(false)
         const [paperCollectInfo, setPaperCollectInfo] = useState('')
         const [shelfTitles, setShelfTitles] = useState([]) // 书架里已有的 {title, author}
-
-        useEffect(() => {
-          let alive = true
-          call('settings.get')
-            .then((value) => {
-              if (!alive) return
-              const list = Array.isArray(value && value.bookSources) ? value.bookSources : []
-              setSources(list)
-              if (list.length > 0) setSourceId(list[0].id)
-              else setFormOpen(true)
-            })
-            .catch(() => {
-              if (!alive) return
-              setSources([])
-              setFormOpen(true)
-            })
-          return () => {
-            alive = false
-          }
-        }, [])
 
         // 书架里已有的书名：只用来给检索结果显示「已在本地」角标。
         // 读不到就当没有——这一步失败绝不能让整个面板打不开。
@@ -8489,7 +8536,7 @@ window.__ModuleLoader__.load({
           return () => clearTimeout(timer)
         }, [paperInfo, paperCopiedAt])
 
-        const busy = urlBusy || downloading !== '' || savingSource
+        const busy = urlBusy
         const close = () => {
           if (busy) return
           if (typeof props.onClose === 'function') props.onClose()
@@ -8509,79 +8556,6 @@ window.__ModuleLoader__.load({
             setUrlError(humanizeError(error))
           } finally {
             setUrlBusy(false)
-          }
-        }
-
-        const runSearch = async () => {
-          const value = keyword.trim()
-          if (value === '') {
-            setSearchError('输入书名或作者，再点搜索。')
-            return
-          }
-          if (Array.isArray(sources) && sources.length === 0) {
-            setSearchError('还没有书源：先在下面填一个搜索地址模板。')
-            return
-          }
-          setSearching(true)
-          setSearchError('')
-          setSearchInfo('')
-          setCandidates(null)
-          try {
-            const result = await call('source.search', { query: value, sourceId: sourceId || undefined })
-            const list = Array.isArray(result && result.candidates) ? result.candidates : []
-            setCandidates(list)
-            const name = result && result.source && result.source.name ? result.source.name : '书源'
-            setSearchInfo(
-              list.length === 0
-                ? `${name} 没有返回可用的链接。可能站点改版了，换一个书源试试。`
-                : `${name} · 找到 ${list.length} 条，点右边的「下载」加入书架`,
-            )
-          } catch (error) {
-            setSearchError(humanizeError(error))
-          } finally {
-            setSearching(false)
-          }
-        }
-
-        const download = async (candidate) => {
-          setDownloadError('')
-          setDownloading(candidate.url)
-          try {
-            await props.onImportUrl(candidate.url, candidate.title)
-          } catch (error) {
-            setDownloadError(humanizeError(error))
-          } finally {
-            setDownloading('')
-          }
-        }
-
-        const saveSource = async () => {
-          const name = formName.trim() === '' ? '我的书源' : formName.trim()
-          const template = formTemplate.trim()
-          if (!/^https?:\/\//i.test(template)) {
-            setFormError('搜索地址要以 http:// 或 https:// 开头。')
-            return
-          }
-          if (!template.includes('{query}')) {
-            setFormError('搜索地址里要留一个 {query}，它会被换成你搜的关键词。')
-            return
-          }
-          setSavingSource(true)
-          setFormError('')
-          const next = (sources || []).filter((item) => item && item.name !== name)
-          next.push({ id: `src-${Date.now().toString(36)}`, name, searchUrl: template })
-          try {
-            const saved = await call('settings.put', { bookSources: next })
-            const list = Array.isArray(saved && saved.bookSources) ? saved.bookSources : next
-            setSources(list)
-            setSourceId(list[list.length - 1].id)
-            setFormOpen(false)
-            setFormName('')
-            setFormTemplate('')
-          } catch (error) {
-            setFormError(humanizeError(error))
-          } finally {
-            setSavingSource(false)
           }
         }
 
@@ -8886,110 +8860,19 @@ window.__ModuleLoader__.load({
                 ),
                 urlError !== '' ? h('div', { className: 'dr-import-error' }, urlError) : null,
               ),
-              // ③ 找书
+              // ③ 找书：0.13.1 起统一走「书源」面板（Legado），这里只留一句指路。
+              // 以前那套「自己填搜索地址模板」只能抓一页 HTML 里的下载直链，站点一改版就废。
               h(
                 'div',
                 { className: 'dr-import-section' },
-                h('div', { className: 'dr-import-title' }, '③ 找书（用你自己的书源）'),
-                h('div', { className: 'dr-import-hint' }, '填一个「搜索地址模板」，插件去抓那个页面的搜索结果显示出来。模板里把关键词的位置写成 {query}。'),
+                h('div', { className: 'dr-import-title' }, '③ 找书（书源）'),
                 h(
                   'div',
-                  { className: 'dr-import-row' },
-                  h('input', {
-                    type: 'text',
-                    className: 'dr-input',
-                    value: keyword,
-                    placeholder: '书名或作者',
-                    'aria-label': '搜索关键词',
-                    onChange: (event) => setKeyword(event.target.value),
-                    onKeyDown: (event) => {
-                      if (event.key === 'Enter') runSearch()
-                    },
-                  }),
-                  Array.isArray(sources) && sources.length > 1
-                    ? h(
-                      'select',
-                      {
-                        className: 'dr-input dr-select',
-                        value: sourceId,
-                        'aria-label': '选择书源',
-                        onChange: (event) => setSourceId(event.target.value),
-                      },
-                      sources.map((item) => h('option', { key: item.id, value: item.id }, item.name)),
-                    )
-                    : null,
-                  h(
-                    'button',
-                    { type: 'button', className: 'dr-btn', disabled: searching || busy, onClick: runSearch },
-                    searching ? '正在搜…' : '搜索',
-                  ),
+                  { className: 'dr-import-hint' },
+                  '找书统一在顶部的「书源」面板里：导入 Legado 书源 → 搜书名 → 一键加入书架。关掉这个窗口，点右上角的「书源」就能进去。',
                 ),
-                searchError !== '' ? h('div', { className: 'dr-import-error' }, searchError) : null,
-                searchInfo !== '' ? h('div', { className: 'dr-import-hint' }, searchInfo) : null,
-                downloadError !== '' ? h('div', { className: 'dr-import-error' }, downloadError) : null,
-                candidates !== null && candidates.length > 0
-                  ? h(
-                    'div',
-                    { className: 'dr-candidates' },
-                    candidates.map((item) => h(
-                      'div',
-                      { key: item.url, className: 'dr-candidate' },
-                      h('div', { className: 'dr-candidate-title', title: item.url }, item.title),
-                      h(
-                        'button',
-                        {
-                          type: 'button',
-                          className: 'dr-btn',
-                          disabled: downloading !== '',
-                          onClick: () => download(item),
-                        },
-                        downloading === item.url ? '下载中…' : '下载',
-                      ),
-                    )),
-                  )
-                  : null,
-                // 书源管理：有书源时收起来，没书源时直接展开
-                formOpen
-                  ? h(
-                    'div',
-                    { className: 'dr-source-form' },
-                    h('input', {
-                      type: 'text',
-                      className: 'dr-input',
-                      value: formName,
-                      placeholder: '书源名字（随便起，如「我的站」）',
-                      'aria-label': '书源名字',
-                      onChange: (event) => setFormName(event.target.value),
-                    }),
-                    h('input', {
-                      type: 'text',
-                      className: 'dr-input',
-                      value: formTemplate,
-                      placeholder: 'https://example.com/search?q={query}',
-                      'aria-label': '搜索地址模板',
-                      onChange: (event) => setFormTemplate(event.target.value),
-                    }),
-                    h(
-                      'div',
-                      { className: 'dr-import-row' },
-                      h(
-                        'button',
-                        { type: 'button', className: 'dr-btn dr-btn-primary', disabled: busy, onClick: saveSource },
-                        savingSource ? '保存中…' : '保存书源',
-                      ),
-                      Array.isArray(sources) && sources.length > 0
-                        ? h('button', { type: 'button', className: 'dr-btn', onClick: () => setFormOpen(false) }, '取消')
-                        : null,
-                    ),
-                    formError !== '' ? h('div', { className: 'dr-import-error' }, formError) : null,
-                  )
-                  : h(
-                    'button',
-                    { type: 'button', className: 'dr-btn dr-import-linkbtn', onClick: () => setFormOpen(true) },
-                    '添加/修改书源',
-                  ),
               ),
-              // ④ 知网检索
+              // ④ 知网检索（编号沿用四位：① 本地文件 ② 粘贴链接 ③ 找书 ④ 知网）
               h(
                 'div',
                 { className: 'dr-import-section' },
@@ -15892,7 +15775,8 @@ window.__ModuleLoader__.load({
               h('p', null, '左侧栏点 Reading 图标打开面板。书架里点一本书开始读，读到哪会自动记住，下次打开直接回到那一页。'),
               h('p', null, '支持的格式：EPUB 原样排版（保留插图和版式）；MOBI / AZW3 / TXT / PDF 会转成纯文字重排 —— 能读、能划线、能记笔记，但不保留原书的插图和字体。扫描版 PDF 和加密 PDF 读不了，界面会直接说明原因。'),
               h('h4', null, '把书放进书架'),
-              h('p', null, '书架的「导入」面板有三段：①从电脑里选文件（也能把文件直接拖进窗口）；②粘贴一条指向文件本身的下载直链；③「找书」——先自己填一个书源（搜索地址模板，用 {query} 代替关键词），再搜关键词，从结果里点一条下载。插件不内置任何站点，也不带默认书源。'),
+              h('p', null, '书架的「导入」面板有三段：①从电脑里选文件（也能把文件直接拖进窗口）；②粘贴一条指向文件本身的下载直链；③知网检索，勾几条存成一本文献集。'),
+              h('p', null, '想按书名找书，用顶部的「书源」面板：导入一份 Legado 书源 JSON（选文件、粘文本、贴链接都行），之后输入书名或作者就能并发搜各站，点一条直接加入书架。插件不内置任何站点，也不带默认书源——你导什么就是什么。'),
               h('h4', null, '整理书架'),
               h('p', null, '对着书封右键（或点卡片右上角 ✎）可以改书名、作者、简介，填分类、系列，打标签，标成「我的珍藏」，换封面或恢复纸封面。左上角两级下拉可以按「我的珍藏 / 系列 / 作者 / 分类 / 标签」筛书架。'),
               h('h4', null, '翻页'),

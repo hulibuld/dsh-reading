@@ -47,7 +47,7 @@ const ERROR_TEXT = {
   E_IMPORT_URL_BAD: '这个链接打不开，请检查它是否以 http:// 或 https:// 开头。',
   E_IMPORT_DOWNLOAD: '下载失败了，可能是网络不通或对方站点拒绝了访问。',
   E_SOURCE_QUERY: '先输入要搜的书名或作者。',
-  E_SOURCE_NONE: '还没有配置书源：先在找书面板里填一个搜索地址模板。',
+  E_SOURCE_NONE: '还没有可用书源：点顶部「书源」，导入一份 Legado 书源 JSON 就能搜书了。',
   E_SOURCE_BAD: '这个书源的搜索地址写得不对，重新填一次。',
   E_SOURCE_FETCH: '连不上这个书源，可能是网络问题或地址写错了。',
   // 「贴链接导入书源」这条路独有的三种失败：
@@ -70,6 +70,9 @@ const ERROR_TEXT = {
   E_BUSY: '上一次操作还没结束，请稍等一下。',
   E_BAD_REQUEST: '这次请求没能被接受，请重试一次。',
   E_INTERNAL: '后台出了点问题，请稍后再试。',
+  E_BODY_TOO_BIG: '这次提交的内容太大了，分成几次再试。',
+  E_LEGADO_EMPTY: '没有收到书源内容：贴一段链接、把 JSON 复制进来，或者选一个 .json 文件。',
+  E_LEGADO_BAD_JSON: '这个文件不是合法的书源 JSON，检查一下有没有复制全。',
 }
 
 /** 完全给不出信息时的兜底。绝不留空，也绝不显示异常原文。 */
@@ -103,6 +106,16 @@ export function humanizeError(err) {
 
   const text = raw.trim()
   if (text === '') return ''
+
+  // 通用解包：宿主契约是「CODE: 人话」。码前缀本身会被 MACHINE_PATTERNS 判成
+  // 机器语言（\bE_[A-Z][A-Z0-9_]+\b），那样即使后半段是好好的中文，整句也会被
+  // 顶成 GENERIC。所以先剥掉码前缀：后半段是中文且不含机器语言，就直接用它。
+  // 这样表里没收录的码（新增的、以后忘了补的）也能出中文。
+  const unpacked = /^([A-Z][A-Z0-9_]{2,40}):\s*([\s\S]+)$/.exec(text)
+  if (unpacked) {
+    const rest = unpacked[2].trim()
+    if (rest !== '' && /[\u4e00-\u9fa5]/.test(rest) && !MACHINE_PATTERNS.some((re) => re.test(rest))) return rest
+  }
 
   // 已知码优先：宿主返回的 message 基本就是给人看的中文，码只是补充定位
   for (const code of Object.keys(ERROR_TEXT)) {

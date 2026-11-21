@@ -846,11 +846,11 @@ function BookEditDialog(props) {
  * 三条路并列摆出来，而不是藏在二级菜单里：
  *   ① 本地文件 —— 原来就有的行为；
  *   ② 粘贴链接 —— 从任何地方复制来的书籍直链，粘进来就下载入架；
- *   ③ 找书     —— 用户自己填一个「搜索地址模板」，插件去抓结果页列出候选；
- *   ④ 知网检索 —— 直接搜知网，勾几条存成一本文献集（0.12.0）。
+ *   ③ 知网检索 —— 直接搜知网，勾几条存成一本文献集（0.12.0）。
  *
- * 为什么不内置书源：插件不该替用户决定去哪个站点找书。这里只提供机制，
- * 地址由用户自己填；模板里 `{query}` 会被换成关键词。
+ * 原来的「③ 找书（自己填搜索地址模板）」在 0.13.1 退役：那一套只能抓一页
+ * HTML 里的下载直链，站点一改版就废，而且和 Legado 书源功能重复。找书统一走
+ * 顶部的「书源」面板（LegadoPanel）：导入书源 → 搜书名 → 一键入架。
  */
 function ImportDialog(props) {
   const fileRef = useRef(null)
@@ -858,23 +858,7 @@ function ImportDialog(props) {
   const [urlBusy, setUrlBusy] = useState(false)
   const [urlError, setUrlError] = useState('')
 
-  const [keyword, setKeyword] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [searchError, setSearchError] = useState('')
-  const [searchInfo, setSearchInfo] = useState('')
-  const [candidates, setCandidates] = useState(null)
-  const [downloading, setDownloading] = useState('')
-  const [downloadError, setDownloadError] = useState('')
-
-  const [sources, setSources] = useState(null)
-  const [sourceId, setSourceId] = useState('')
-  const [formOpen, setFormOpen] = useState(false)
-  const [formName, setFormName] = useState('')
-  const [formTemplate, setFormTemplate] = useState('')
-  const [formError, setFormError] = useState('')
-  const [savingSource, setSavingSource] = useState(false)
-
-  // ④ 知网检索（0.12.0）
+  // ③ 知网检索（0.12.0）
   const [paperQuery, setPaperQuery] = useState('')
   const [paperField, setPaperField] = useState('title')
   const [paperOrder, setPaperOrder] = useState(4)
@@ -888,26 +872,6 @@ function ImportDialog(props) {
   const [paperCollecting, setPaperCollecting] = useState(false)
   const [paperCollectInfo, setPaperCollectInfo] = useState('')
   const [shelfTitles, setShelfTitles] = useState([]) // 书架里已有的 {title, author}
-
-  useEffect(() => {
-    let alive = true
-    call('settings.get')
-      .then((value) => {
-        if (!alive) return
-        const list = Array.isArray(value && value.bookSources) ? value.bookSources : []
-        setSources(list)
-        if (list.length > 0) setSourceId(list[0].id)
-        else setFormOpen(true)
-      })
-      .catch(() => {
-        if (!alive) return
-        setSources([])
-        setFormOpen(true)
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
 
   // 书架里已有的书名：只用来给检索结果显示「已在本地」角标。
   // 读不到就当没有——这一步失败绝不能让整个面板打不开。
@@ -938,7 +902,7 @@ function ImportDialog(props) {
     return () => clearTimeout(timer)
   }, [paperInfo, paperCopiedAt])
 
-  const busy = urlBusy || downloading !== '' || savingSource
+  const busy = urlBusy
   const close = () => {
     if (busy) return
     if (typeof props.onClose === 'function') props.onClose()
@@ -958,79 +922,6 @@ function ImportDialog(props) {
       setUrlError(humanizeError(error))
     } finally {
       setUrlBusy(false)
-    }
-  }
-
-  const runSearch = async () => {
-    const value = keyword.trim()
-    if (value === '') {
-      setSearchError('输入书名或作者，再点搜索。')
-      return
-    }
-    if (Array.isArray(sources) && sources.length === 0) {
-      setSearchError('还没有书源：先在下面填一个搜索地址模板。')
-      return
-    }
-    setSearching(true)
-    setSearchError('')
-    setSearchInfo('')
-    setCandidates(null)
-    try {
-      const result = await call('source.search', { query: value, sourceId: sourceId || undefined })
-      const list = Array.isArray(result && result.candidates) ? result.candidates : []
-      setCandidates(list)
-      const name = result && result.source && result.source.name ? result.source.name : '书源'
-      setSearchInfo(
-        list.length === 0
-          ? `${name} 没有返回可用的链接。可能站点改版了，换一个书源试试。`
-          : `${name} · 找到 ${list.length} 条，点右边的「下载」加入书架`,
-      )
-    } catch (error) {
-      setSearchError(humanizeError(error))
-    } finally {
-      setSearching(false)
-    }
-  }
-
-  const download = async (candidate) => {
-    setDownloadError('')
-    setDownloading(candidate.url)
-    try {
-      await props.onImportUrl(candidate.url, candidate.title)
-    } catch (error) {
-      setDownloadError(humanizeError(error))
-    } finally {
-      setDownloading('')
-    }
-  }
-
-  const saveSource = async () => {
-    const name = formName.trim() === '' ? '我的书源' : formName.trim()
-    const template = formTemplate.trim()
-    if (!/^https?:\/\//i.test(template)) {
-      setFormError('搜索地址要以 http:// 或 https:// 开头。')
-      return
-    }
-    if (!template.includes('{query}')) {
-      setFormError('搜索地址里要留一个 {query}，它会被换成你搜的关键词。')
-      return
-    }
-    setSavingSource(true)
-    setFormError('')
-    const next = (sources || []).filter((item) => item && item.name !== name)
-    next.push({ id: `src-${Date.now().toString(36)}`, name, searchUrl: template })
-    try {
-      const saved = await call('settings.put', { bookSources: next })
-      const list = Array.isArray(saved && saved.bookSources) ? saved.bookSources : next
-      setSources(list)
-      setSourceId(list[list.length - 1].id)
-      setFormOpen(false)
-      setFormName('')
-      setFormTemplate('')
-    } catch (error) {
-      setFormError(humanizeError(error))
-    } finally {
-      setSavingSource(false)
     }
   }
 
@@ -1335,110 +1226,19 @@ function ImportDialog(props) {
           ),
           urlError !== '' ? h('div', { className: 'dr-import-error' }, urlError) : null,
         ),
-        // ③ 找书
+        // ③ 找书：0.13.1 起统一走「书源」面板（Legado），这里只留一句指路。
+        // 以前那套「自己填搜索地址模板」只能抓一页 HTML 里的下载直链，站点一改版就废。
         h(
           'div',
           { className: 'dr-import-section' },
-          h('div', { className: 'dr-import-title' }, '③ 找书（用你自己的书源）'),
-          h('div', { className: 'dr-import-hint' }, '填一个「搜索地址模板」，插件去抓那个页面的搜索结果显示出来。模板里把关键词的位置写成 {query}。'),
+          h('div', { className: 'dr-import-title' }, '③ 找书（书源）'),
           h(
             'div',
-            { className: 'dr-import-row' },
-            h('input', {
-              type: 'text',
-              className: 'dr-input',
-              value: keyword,
-              placeholder: '书名或作者',
-              'aria-label': '搜索关键词',
-              onChange: (event) => setKeyword(event.target.value),
-              onKeyDown: (event) => {
-                if (event.key === 'Enter') runSearch()
-              },
-            }),
-            Array.isArray(sources) && sources.length > 1
-              ? h(
-                'select',
-                {
-                  className: 'dr-input dr-select',
-                  value: sourceId,
-                  'aria-label': '选择书源',
-                  onChange: (event) => setSourceId(event.target.value),
-                },
-                sources.map((item) => h('option', { key: item.id, value: item.id }, item.name)),
-              )
-              : null,
-            h(
-              'button',
-              { type: 'button', className: 'dr-btn', disabled: searching || busy, onClick: runSearch },
-              searching ? '正在搜…' : '搜索',
-            ),
+            { className: 'dr-import-hint' },
+            '找书统一在顶部的「书源」面板里：导入 Legado 书源 → 搜书名 → 一键加入书架。关掉这个窗口，点右上角的「书源」就能进去。',
           ),
-          searchError !== '' ? h('div', { className: 'dr-import-error' }, searchError) : null,
-          searchInfo !== '' ? h('div', { className: 'dr-import-hint' }, searchInfo) : null,
-          downloadError !== '' ? h('div', { className: 'dr-import-error' }, downloadError) : null,
-          candidates !== null && candidates.length > 0
-            ? h(
-              'div',
-              { className: 'dr-candidates' },
-              candidates.map((item) => h(
-                'div',
-                { key: item.url, className: 'dr-candidate' },
-                h('div', { className: 'dr-candidate-title', title: item.url }, item.title),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dr-btn',
-                    disabled: downloading !== '',
-                    onClick: () => download(item),
-                  },
-                  downloading === item.url ? '下载中…' : '下载',
-                ),
-              )),
-            )
-            : null,
-          // 书源管理：有书源时收起来，没书源时直接展开
-          formOpen
-            ? h(
-              'div',
-              { className: 'dr-source-form' },
-              h('input', {
-                type: 'text',
-                className: 'dr-input',
-                value: formName,
-                placeholder: '书源名字（随便起，如「我的站」）',
-                'aria-label': '书源名字',
-                onChange: (event) => setFormName(event.target.value),
-              }),
-              h('input', {
-                type: 'text',
-                className: 'dr-input',
-                value: formTemplate,
-                placeholder: 'https://example.com/search?q={query}',
-                'aria-label': '搜索地址模板',
-                onChange: (event) => setFormTemplate(event.target.value),
-              }),
-              h(
-                'div',
-                { className: 'dr-import-row' },
-                h(
-                  'button',
-                  { type: 'button', className: 'dr-btn dr-btn-primary', disabled: busy, onClick: saveSource },
-                  savingSource ? '保存中…' : '保存书源',
-                ),
-                Array.isArray(sources) && sources.length > 0
-                  ? h('button', { type: 'button', className: 'dr-btn', onClick: () => setFormOpen(false) }, '取消')
-                  : null,
-              ),
-              formError !== '' ? h('div', { className: 'dr-import-error' }, formError) : null,
-            )
-            : h(
-              'button',
-              { type: 'button', className: 'dr-btn dr-import-linkbtn', onClick: () => setFormOpen(true) },
-              '添加/修改书源',
-            ),
         ),
-        // ④ 知网检索
+        // ④ 知网检索（编号沿用四位：① 本地文件 ② 粘贴链接 ③ 找书 ④ 知网）
         h(
           'div',
           { className: 'dr-import-section' },

@@ -1,5 +1,7 @@
 /**
- * 书籍元数据（0.5.1）的测试：简介 / 分类 / 系列 / 标签 / 珍藏 / 书源设置。
+ * 书籍元数据（0.5.1）的测试：简介 / 分类 / 系列 / 标签 / 珍藏。
+ *
+ * 0.13.1：老「网页模板书源」退役，书源设置那一组测试一并删掉（settings 里不再有 bookSources）。
  *
  * 这些字段全部是「用户自己填的、只存在本机」的信息，所以测试关注两件事：
  *   1. 写了能读回来，清空能真的删掉（不是留一个空字符串在 meta.json 里）；
@@ -147,43 +149,23 @@ function normalizesTags() {
   assert.equal(normalizeTags(['x'.repeat(25)]), null)
 }
 
-async function validatesBookSources() {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-reading-src-'))
+/** 0.13.1：老 settings.json 里的 bookSources 不许从 getSettings 流出来。 */
+async function retiresLegacyBookSources() {
+  // 纯函数层：base 里带着老键，出口也必须干净
+  const merged = mergeSettings({ fontSize: 20, bookSources: [{ id: 's1', name: '老源', searchUrl: 'https://x/?q={query}' }] }, {})
+  assert.equal(Object.hasOwn(merged, 'bookSources'), false, 'mergeSettings 必须把老 bookSources 删掉')
+  assert.equal(merged.fontSize, 20, '其它字段不许受牵连')
+  // 往 putSettings 里塞 bookSources：多出来的键被严格模式挡掉，落盘不会有这个键
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-reading-legacy-src-'))
   try {
     const store = new LibraryStore({ libraryDir: dir, logger: { warn: () => {} } })
-    const ok = await store.putSettings({
-      bookSources: [{ id: 's1', name: '我的站', searchUrl: 'https://example.com/search?q={query}' }],
-    })
-    assert.equal(ok.bookSources.length, 1)
-    assert.equal((await store.getSettings()).bookSources[0].id, 's1')
-
-    // 缺 {query} 的模板存不进去（否则搜出来的永远是同一个页面）
-    await assert.rejects(
-      () => store.putSettings({ bookSources: [{ id: 's2', name: 'x', searchUrl: 'https://example.com/search' }] }),
-      /设置没能保存/,
-    )
-    // 非 http(s) 也不行
-    await assert.rejects(
-      () => store.putSettings({ bookSources: [{ id: 's3', name: 'x', searchUrl: 'file:///tmp/{query}' }] }),
-      /设置没能保存/,
-    )
-    // 超过 8 条
-    const many = Array.from({ length: 9 }, (_, i) => ({
-      id: `s${i}`,
-      name: `源${i}`,
-      searchUrl: 'https://example.com/?q={query}',
-    }))
-    await assert.rejects(() => store.putSettings({ bookSources: many }), /设置没能保存/)
+    await store.putSettings({ fontSize: 19, bookSources: [{ id: 's1', name: '老源', searchUrl: 'https://x/?q={query}' }] })
+    const after = await store.getSettings()
+    assert.equal(Object.hasOwn(after, 'bookSources'), false, '落盘回来的设置里不许再有 bookSources')
+    assert.equal(after.fontSize, 19, '同一次写入的其它字段要生效')
   } finally {
     await fs.rm(dir, { recursive: true, force: true })
   }
-}
-
-function defaultsHaveEmptySources() {
-  assert.deepEqual(DEFAULT_SETTINGS.bookSources, [])
-  // 老 settings.json 没有这个键时，合并结果要有空数组而不是 undefined
-  const merged = mergeSettings(DEFAULT_SETTINGS, { fontSize: 20 })
-  assert.deepEqual(merged.bookSources, [])
 }
 
 const cases = {
@@ -192,8 +174,7 @@ const cases = {
   超长与超量输入被拒绝: rejectsOversizedInput,
   书架带出元数据: shelfExposesMetadata,
   标签归一化: normalizesTags,
-  书源设置校验: validatesBookSources,
-  默认书源为空: defaultsHaveEmptySources,
+  老书源不再流出: retiresLegacyBookSources,
 }
 
 /** 统一入口约定：`export default async function run()`。 */
